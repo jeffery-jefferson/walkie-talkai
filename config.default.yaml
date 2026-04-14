@@ -1,0 +1,32 @@
+copilot:
+  model: claude-sonnet-4
+  system_prompt: |
+    You are a helpful voice assistant. Be concise and direct.
+    Respond in plain text unless code is specifically requested.
+
+context:
+  working_directory: null
+  include_clipboard: false
+  custom_instructions: null
+
+activation:
+  hotkey: ctrl+shift+space
+  cancel_phrases:
+    - scrap that
+    - nevermind
+    - never mind
+    - scratch that
+
+stt:
+  model_path: models/vosk/vosk-model-small-en-us
+  sample_rate: 16000
+
+overlay:
+  position: top-left
+  opacity: 0.92
+  auto_hide_seconds: 15
+  max_width: 500
+  max_height: 400
+
+tray:
+  enabled: true

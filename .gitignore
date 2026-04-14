@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+node_modules/
+*.log
+config.yaml
+.env
+models/

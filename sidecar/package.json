@@ -1,0 +1,13 @@
+{
+  "name": "walkie-talkai-sidecar",
+  "version": "0.1.0",
+  "description": "Copilot SDK bridge for walkie-talkai",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "latest"
+  }
+}
