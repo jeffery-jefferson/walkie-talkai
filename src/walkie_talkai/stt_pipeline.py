@@ -28,7 +28,7 @@ class STTPipeline:
         on_partial_text: Callable[[str], None] | None = None,
         on_final_text: Callable[[str], None] | None = None,
         on_recording_stop: Callable[[], None] | None = None,
-        on_cancelled: Callable[[], None] | None = None,
+        on_cancelled: Callable[[str, str], None] | None = None,
     ):
         """
         Initialize the STT pipeline.
@@ -39,14 +39,14 @@ class STTPipeline:
             on_partial_text: Called with partial transcription as user speaks
             on_final_text: Called with final transcription when user releases hotkey
             on_recording_stop: Called when recording ends (before final text)
-            on_cancelled: Called when user says a cancel phrase
+            on_cancelled: Called with (cancel_phrase, full_transcript_text)
         """
         self.config = config
         self.on_recording_start = on_recording_start or (lambda: None)
         self.on_partial_text = on_partial_text or (lambda _: None)
         self.on_final_text = on_final_text or (lambda _: None)
         self.on_recording_stop = on_recording_stop or (lambda: None)
-        self.on_cancelled = on_cancelled or (lambda: None)
+        self.on_cancelled = on_cancelled or (lambda _p, _t: None)
 
         self.stt: VoskSTT | None = None
         self.mic: AudioCapture | None = None
@@ -55,6 +55,10 @@ class STTPipeline:
         self.recognizer = None
         self.lock = threading.Lock()
         self.is_recording = False
+        self._committed: list[str] = []  # accumulates committed Vosk endpoint results
+        self._best_partial: str = ""     # longest partial seen in current Vosk segment
+        self._last_committed_count: int = 0  # detects when Vosk commits new words
+        self._cancel_detected: bool = False  # set when cancel phrase found in real-time
 
     def start(self) -> None:
         """Initialize STT model, audio capture, and start hotkey listener."""
@@ -118,13 +122,39 @@ class STTPipeline:
 
         logger.info("STT pipeline stopped")
 
+    def _detect_cancel_phrase(self, text: str) -> str | None:
+        """Check if any cancel phrase appears in the given text (case-insensitive substring match)."""
+        if not text:
+            return None
+        cancel_phrases = [p.lower().strip() for p in self.config.activation.cancel_phrases]
+        lower_text = text.lower()
+        return next((p for p in cancel_phrases if p in lower_text), None)
+
+    def _reset_transcript_state(self) -> None:
+        """Clear all transcript accumulators and create a fresh recognizer.
+
+        Must be called while holding self.lock.
+        """
+        self._committed = []
+        self._best_partial = ""
+        self._last_committed_count = 0
+        self._cancel_detected = False
+        if self.stt:
+            self.recognizer = self.stt.new_recognizer()
+
+    def _build_display_text(self, committed_words: list[str], partial: str) -> str:
+        """Assemble the full display text from committed words and current partial."""
+        committed_text = " ".join(committed_words)
+        if partial:
+            return (committed_text + " " + partial).strip() if committed_text else partial
+        return committed_text
+
     def _on_hotkey_press(self) -> None:
         """Called when push-to-talk hotkey is pressed."""
         with self.lock:
             if not self.stt or not self.mic:
                 return
-
-            self.recognizer = self.stt.new_recognizer()
+            self._reset_transcript_state()
             self.is_recording = True
 
         try:
@@ -141,31 +171,29 @@ class STTPipeline:
         with self.lock:
             if not self.is_recording or not self.stt or not self.recognizer:
                 return
-
             self.is_recording = False
 
         try:
-            # Stop audio capture
             self.mic.stop()
             self.on_recording_stop()
 
-            # Finalize STT to get complete text
+            # Finalize STT to get complete text — pass committed so pauses don't drop words
             with self.lock:
-                final_text = self.stt.finalize(self.recognizer).strip()
+                final_text = self.stt.finalize(self.recognizer, self._committed).strip()
                 self.recognizer = None
+                self._committed = []
 
-            # Check for empty text
+            # Check for empty text — reset to idle so overlay doesn't stick on "Thinking..."
             if not final_text:
                 logger.debug("No speech detected")
+                self.on_cancelled("", "")
                 return
 
-            # Check against cancel phrases
-            lower_text = final_text.lower().strip()
-            cancel_phrases = [p.lower().strip() for p in self.config.activation.cancel_phrases]
-
-            if lower_text in cancel_phrases:
-                logger.debug(f"Cancelled: matched cancel phrase '{final_text}'")
-                self.on_cancelled()
+            # Check against cancel phrases (substring match — user may say other words too)
+            cancel_match = self._detect_cancel_phrase(final_text)
+            if cancel_match is not None:
+                logger.debug(f"Cancelled: matched '{cancel_match}' in '{final_text}'")
+                self.on_cancelled(cancel_match, final_text)
             else:
                 logger.debug(f"Final transcription: {final_text}")
                 self.on_final_text(final_text)
@@ -176,16 +204,43 @@ class STTPipeline:
                 self.recognizer = None
 
     def _on_chunk(self, chunk: np.ndarray) -> None:
-        """Called for each audio chunk during recording."""
+        """Process an audio chunk: feed to Vosk, track partials, detect cancellation."""
         with self.lock:
             if not self.is_recording or not self.stt or not self.recognizer:
                 return
 
-            # Feed chunk to STT and get partial text
-            partial_text = self.stt.feed(self.recognizer, chunk)
+            partial_text = self.stt.feed(self.recognizer, chunk, self._committed)
+            committed_snapshot = list(self._committed)
+            committed_len = len(committed_snapshot)
+            endpoint_fired = committed_len > self._last_committed_count
 
-        if partial_text:
-            partial_text = partial_text.strip()
-            if partial_text:
-                logger.debug(f"Partial: {partial_text}")
-                self.on_partial_text(partial_text)
+            if endpoint_fired:
+                self._last_committed_count = committed_len
+                self._best_partial = ""
+                display_partial = ""
+            else:
+                partial = (partial_text or "").strip()
+                if len(partial) > len(self._best_partial):
+                    self._best_partial = partial
+                display_partial = self._best_partial
+
+        full_text = self._build_display_text(committed_snapshot, display_partial)
+
+        if full_text:
+            logger.debug(f"{'Committed' if endpoint_fired else 'Partial'}: {full_text}")
+
+        # Real-time cancel detection
+        if full_text:
+            cancel_match = self._detect_cancel_phrase(full_text)
+            if cancel_match is not None:
+                with self.lock:
+                    if self._cancel_detected:
+                        return  # debounce
+                    self._cancel_detected = True
+                    self._reset_transcript_state()
+                    self._cancel_detected = False
+                self.on_cancelled(cancel_match, full_text)
+                return
+
+        if full_text:
+            self.on_partial_text(full_text)

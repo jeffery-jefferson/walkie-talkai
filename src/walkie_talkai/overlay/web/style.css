@@ -6,50 +6,91 @@
 }
 
 html, body {
-    background: transparent;
+    background: #14141e;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    font-size: 14px;
+    font-size: 13px;
     color: #ffffff;
     overflow: hidden;
+    width: 100%;
+    height: 100%;
+    border-radius: 10px;
 }
 
-/* Main overlay container */
+/* Collapsed tab — pill shown when idle */
+.collapsed-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100px;
+    height: 24px;
+    background: #1e1e2e;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: default;
+    padding: 0 10px;
+}
+
+.collapsed-tab.hidden {
+    display: none;
+}
+
+.tab-label {
+    font-size: 9px;
+    font-weight: 500;
+    color: #9ca3af;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.tab-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+    transition: background 0.3s ease;
+}
+
+.tab-dot.idle {
+    background: #10b981;
+}
+
+.tab-dot.recording {
+    background: #ef4444;
+    animation: pulse 2s infinite;
+}
+
+.tab-dot.processing {
+    background: #3b82f6;
+    animation: spin 1s linear infinite;
+}
+
+/* Main overlay container — the window IS the card */
 .overlay-container {
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    max-width: 500px;
-    min-width: 280px;
-    max-height: 400px;
-    background: rgba(20, 20, 30, 0.92);
-    border-radius: 12px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 
-                0 2px 8px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    height: 100%;
+    background: #14141e;
+    border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 16px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    transform: translateY(0);
+    padding: 8px;
+    overflow-y: auto;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     opacity: 1;
-    z-index: 10000;
 }
 
 .overlay-container.hidden {
-    opacity: 0;
-    transform: translateY(-20px);
-    pointer-events: none;
+    display: none;
 }
 
 /* Status area */
 .status-area {
-    margin-bottom: 12px;
+    margin-bottom: 4px;
 }
 
 .status-indicator {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .status-dot {
@@ -75,7 +116,7 @@ html, body {
 }
 
 .status-text {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: #d1d5db;
 }
@@ -100,7 +141,7 @@ html, body {
 @keyframes fadeInUp {
     from {
         opacity: 0;
-        transform: translateY(8px);
+        transform: translateY(6px);
     }
     to {
         opacity: 1;
@@ -110,10 +151,10 @@ html, body {
 
 /* Transcript area */
 .transcript-area {
-    margin-bottom: 16px;
-    padding: 12px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
+    border-radius: 6px;
     border-left: 3px solid #6366f1;
     animation: fadeInUp 0.3s ease;
 }
@@ -123,18 +164,30 @@ html, body {
 }
 
 .transcript-label {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: #9ca3af;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
 }
 
 .transcript-text {
     font-style: italic;
     color: #e5e7eb;
-    line-height: 1.4;
+    line-height: 1.3;
+}
+
+.transcript-text.cancelled {
+    font-style: normal;
+    color: #f87171;
+    text-decoration: line-through;
+    opacity: 0.8;
+}
+
+.transcript-text.fading {
+    transition: opacity 0.75s ease-out;
+    opacity: 0;
 }
 
 /* Response area */
@@ -147,18 +200,18 @@ html, body {
 }
 
 .response-label {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: #9ca3af;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .response-content {
-    max-height: 280px;
+    max-height: calc(100vh - 120px);
     overflow-y: auto;
-    line-height: 1.5;
+    line-height: 1.4;
     color: #f3f4f6;
     scrollbar-width: thin;
     scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
@@ -184,7 +237,7 @@ html, body {
 
 /* Typography in responses */
 .response-content p {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .response-content p:last-child {
@@ -204,22 +257,22 @@ html, body {
 .response-content code {
     background: rgba(0, 0, 0, 0.4);
     color: #fbbf24;
-    padding: 2px 4px;
-    border-radius: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
     font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .response-content pre {
     background: rgba(0, 0, 0, 0.6);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 6px;
-    padding: 12px;
-    margin: 8px 0;
+    padding: 8px;
+    margin: 6px 0;
     overflow-x: auto;
     font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 11px;
+    line-height: 1.3;
 }
 
 .response-content pre code {
@@ -233,12 +286,12 @@ html, body {
 .error-area {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px;
+    gap: 6px;
+    padding: 8px 10px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 8px;
-    margin-top: 12px;
+    border-radius: 6px;
+    margin-top: 8px;
     animation: fadeInUp 0.3s ease;
 }
 
@@ -247,14 +300,14 @@ html, body {
 }
 
 .error-icon {
-    font-size: 16px;
+    font-size: 14px;
     flex-shrink: 0;
 }
 
 .error-message {
     color: #fecaca;
-    font-size: 13px;
-    line-height: 1.4;
+    font-size: 12px;
+    line-height: 1.3;
 }
 
 /* Token streaming animation */
@@ -270,16 +323,6 @@ html, body {
     to {
         opacity: 1;
         transform: translateY(0);
-    }
-}
-
-/* Responsive adjustments */
-@media (max-width: 480px) {
-    .overlay-container {
-        left: 8px;
-        right: 8px;
-        max-width: calc(100vw - 16px);
-        min-width: auto;
     }
 }
 

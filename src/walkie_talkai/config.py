@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import yaml
 
@@ -14,7 +14,7 @@ import yaml
 class CopilotConfig:
     """Copilot/Claude configuration."""
 
-    model: str = "claude-sonnet-4"
+    model: str = "gpt-4.1"
     system_prompt: str = "You are a helpful voice assistant. Be concise and direct.\nRespond in plain text unless code is specifically requested.\n"
 
 
@@ -52,8 +52,8 @@ class OverlayConfig:
     position: str = "top-left"
     opacity: float = 0.92
     auto_hide_seconds: int = 15
-    max_width: int = 500
-    max_height: int = 400
+    max_width: int = 340
+    max_height: int = 180
 
 
 @dataclass
@@ -73,6 +73,14 @@ class Config:
     stt: STTConfig = field(default_factory=STTConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     tray: TrayConfig = field(default_factory=TrayConfig)
+
+
+AVAILABLE_MODELS: list[str] = [
+    "claude-sonnet-4", "claude-sonnet-4.5", "claude-sonnet-4.6",
+    "claude-haiku-4.5", "claude-opus-4.5", "claude-opus-4.6",
+    "gpt-5-mini", "gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.4-mini",
+    "gpt-4.1",
+]
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -95,22 +103,15 @@ def _dict_to_dataclass(data: dict[str, Any], dataclass_type: type) -> Any:
     if not isinstance(data, dict):
         return data
 
+    resolved_hints = get_type_hints(dataclass_type)
     field_values = {}
     for f in fields(dataclass_type):
         if f.name in data:
             value = data[f.name]
-            # Get the actual type (handle Optional, Union, etc.)
-            field_type = f.type
-            # Handle string annotations
-            if isinstance(field_type, str):
-                field_type = eval(field_type)  # noqa: eval usage for type hints
-            
-            # If the field type is a dataclass, recursively convert
-            if is_dataclass(field_type):
-                if isinstance(value, dict):
-                    field_values[f.name] = _dict_to_dataclass(value, field_type)
-                else:
-                    field_values[f.name] = value
+            field_type = resolved_hints.get(f.name, f.type)
+
+            if is_dataclass(field_type) and isinstance(value, dict):
+                field_values[f.name] = _dict_to_dataclass(value, field_type)
             else:
                 field_values[f.name] = value
 

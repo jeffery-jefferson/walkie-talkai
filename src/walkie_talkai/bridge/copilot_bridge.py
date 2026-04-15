@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator
 from dataclasses import dataclass
 import sys
 
@@ -36,14 +36,14 @@ class CopilotBridge:
             sidecar_dir = Path(__file__).resolve().parent.parent.parent.parent / "sidecar"
         
         self.sidecar_dir = Path(sidecar_dir)
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self.reader_task: Optional[asyncio.Task] = None
+        self.process: asyncio.subprocess.Process | None = None
+        self.reader_task: asyncio.Task | None = None
         self.event_queue: asyncio.Queue[SidecarEvent] = asyncio.Queue()
         self.active_streams: dict[str, asyncio.Queue[str]] = {}
         self.stream_counter = 0
         self._running = False
-        self._model: Optional[str] = None
-        self._system_prompt: Optional[str] = None
+        self._model: str | None = None
+        self._system_prompt: str | None = None
         
     async def start(self, model: str, system_prompt: str) -> None:
         """Start the sidecar subprocess and initialize a Copilot session.
@@ -72,12 +72,17 @@ class CopilotBridge:
         
         try:
             # Start the Node.js sidecar process
+            kwargs = {}
+            if sys.platform == "win32":
+                import subprocess as _sp
+                kwargs["creationflags"] = _sp.CREATE_NO_WINDOW
             self.process = await asyncio.create_subprocess_exec(
                 "node", "index.mjs",
                 cwd=str(self.sidecar_dir),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                **kwargs
             )
             
             logger.info(f"Sidecar process started with PID: {self.process.pid}")

@@ -15,6 +15,19 @@ from walkie_talkai.stt_pipeline import STTPipeline
 logger = logging.getLogger(__name__)
 
 
+def _read_custom_instructions(path: str) -> str | None:
+    """Read custom instructions from a file, returning None on failure or empty content."""
+    instructions_path = Path(path)
+    if not instructions_path.exists():
+        return None
+    try:
+        content = instructions_path.read_text(encoding="utf-8").strip()
+        return content or None
+    except Exception as e:
+        logger.warning(f"Error reading custom instructions: {e}")
+        return None
+
+
 class WalkieTalkAI:
     """Main application orchestrator that connects STT pipeline → Copilot bridge → overlay."""
     
@@ -31,6 +44,7 @@ class WalkieTalkAI:
         
         # Runtime state
         self._running = False
+        self._startup_errors: list[str] = []   # filled during start()
         
     async def start(self) -> None:
         """Start all components in order:
@@ -44,44 +58,56 @@ class WalkieTalkAI:
             
         logger.info("Starting WalkieTalkAI...")
         self._loop = asyncio.get_running_loop()
-        
+        self._startup_errors = []
+
         try:
             # 1. Start overlay WebSocket server
             logger.info("Starting overlay server...")
-            await self.overlay_server.start()
-            
+            try:
+                await self.overlay_server.start()
+            except Exception as e:
+                self._startup_errors.append(f"Overlay server: {e}")
+                logger.error(f"Failed to start overlay server: {e}")
+                raise  # overlay server is critical — can't continue without it
+
             # 2. Start Copilot bridge (sidecar)
             logger.info("Starting Copilot bridge...")
             system_prompt = self._build_system_prompt()
-            await self.copilot_bridge.start(
-                model=self.config.copilot.model,
-                system_prompt=system_prompt
-            )
-            
+            try:
+                await self.copilot_bridge.start(
+                    model=self.config.copilot.model,
+                    system_prompt=system_prompt
+                )
+            except Exception as e:
+                self._startup_errors.append(f"Copilot/Node sidecar: {e}")
+                logger.error(f"Failed to start Copilot bridge: {e}")
+                await self.overlay_server.send_error(f"Copilot unavailable: {e}")
+                # Continue — STT can still work without the bridge
+
             # 3. Start STT pipeline (hotkey listener)
             logger.info("Starting STT pipeline...")
             try:
-                # Create STT pipeline with threadsafe callbacks
                 self.stt_pipeline = STTPipeline(
                     config=self.config,
                     on_recording_start=lambda: self._schedule(self._on_recording_start()),
                     on_partial_text=lambda text: self._schedule(self._on_partial_text(text)),
                     on_final_text=lambda text: self._schedule(self._on_final_text(text)),
                     on_recording_stop=lambda: self._schedule(self._on_recording_stop()),
-                    on_cancelled=lambda: self._schedule(self._on_cancelled()),
+                    on_cancelled=lambda phrase, full_text: self._schedule(self._on_cancelled(phrase, full_text)),
                 )
                 self.stt_pipeline.start()
             except Exception as e:
+                self._startup_errors.append(f"Speech recognition (Vosk): {e}")
                 logger.error(f"Failed to start STT pipeline: {e}")
-                await self.overlay_server.send_error(f"Speech recognition unavailable: {str(e)}")
+                await self.overlay_server.send_error(f"Speech recognition unavailable: {e}")
                 # Continue running even without STT
-            
+
             # 4. Start config watcher
             self.config_watcher.start()
-            
+
             self._running = True
             logger.info("WalkieTalkAI started successfully")
-            
+
             # Send initial idle state to overlay
             await self.overlay_server.send_status("idle")
             
@@ -234,13 +260,13 @@ class WalkieTalkAI:
         except Exception as e:
             logger.error(f"Error sending processing status: {e}")
     
-    async def _on_cancelled(self) -> None:
+    async def _on_cancelled(self, phrase: str = "scratch that", full_text: str = "") -> None:
         """STT callback: cancel phrase detected.
-        Send hide event to overlay.
+        Show brief cancellation feedback on overlay then collapse.
         """
-        logger.debug("Cancelled by user")
+        logger.debug(f"Cancelled by user: '{phrase}' (full: '{full_text}')")
         try:
-            await self.overlay_server.send_hide()
+            await self.overlay_server.send_cancelled(phrase, full_text=full_text)
             await self.overlay_server.send_status("idle")
         except Exception as e:
             logger.error(f"Error sending cancel event: {e}")
@@ -256,17 +282,15 @@ class WalkieTalkAI:
         if self.config.context.working_directory:
             prompt_parts.append(f"Working directory: {self.config.context.working_directory}")
         
+        # TODO: clipboard injection not yet implemented
+        # if self.config.context.include_clipboard:
+        #     ...
+
         # Add custom instructions from file
         if self.config.context.custom_instructions:
-            custom_instructions_path = Path(self.config.context.custom_instructions)
-            if custom_instructions_path.exists():
-                try:
-                    with open(custom_instructions_path, 'r', encoding='utf-8') as f:
-                        custom_instructions = f.read().strip()
-                        if custom_instructions:
-                            prompt_parts.append(f"Custom instructions: {custom_instructions}")
-                except Exception as e:
-                    logger.warning(f"Error reading custom instructions: {e}")
+            instructions = _read_custom_instructions(self.config.context.custom_instructions)
+            if instructions:
+                prompt_parts.append(f"Custom instructions: {instructions}")
         
         # Add the spoken text (this is the main user request)
         prompt_parts.append(spoken_text)
@@ -293,17 +317,9 @@ class WalkieTalkAI:
         
         # Add custom instructions from file to system prompt
         if self.config.context.custom_instructions:
-            custom_instructions_path = Path(self.config.context.custom_instructions)
-            if custom_instructions_path.exists():
-                try:
-                    with open(custom_instructions_path, 'r', encoding='utf-8') as f:
-                        custom_instructions = f.read().strip()
-                        if custom_instructions:
-                            system_parts.append(
-                                f"Additional user instructions:\n{custom_instructions}"
-                            )
-                except Exception as e:
-                    logger.warning(f"Error reading custom instructions: {e}")
+            instructions = _read_custom_instructions(self.config.context.custom_instructions)
+            if instructions:
+                system_parts.append(f"Additional user instructions:\n{instructions}")
         
         return "\n\n".join(system_parts)
     
@@ -315,10 +331,16 @@ class WalkieTalkAI:
             
         try:
             await self.copilot_bridge.switch_model(model)
+            self.config.copilot.model = model
             logger.info(f"Switched to model: {model}")
         except Exception as e:
             logger.error(f"Error switching model: {e}")
             raise
+    
+    @property
+    def current_model(self) -> str:
+        """The currently active model."""
+        return self.config.copilot.model
     
     async def reset_conversation(self) -> None:
         """Reset the Copilot conversation."""
@@ -352,6 +374,16 @@ class WalkieTalkAI:
     def is_running(self) -> bool:
         """Check if the application is running."""
         return self._running
+
+    @property
+    def startup_summary(self) -> str:
+        """Human-readable startup status for the tray notification."""
+        if not self._startup_errors:
+            return "✅ WalkieTalkAI started successfully"
+        lines = ["⚠️ Started with errors:"]
+        for err in self._startup_errors:
+            lines.append(f"  • {err}")
+        return "\n".join(lines)
     
     @property 
     def client_count(self) -> int:

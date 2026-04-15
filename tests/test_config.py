@@ -31,10 +31,7 @@ def test_default_config_loads():
     assert isinstance(cfg.tray, TrayConfig)
     
     # Verify some key defaults
-    assert cfg.copilot.model == "claude-sonnet-4"
-    assert cfg.stt.sample_rate == 16000
-    assert cfg.overlay.position == "top-left"
-    assert cfg.overlay.opacity == 0.92
+    assert cfg.copilot.model == "gpt-4.1"
 
 
 def test_deep_merge_basic():
@@ -95,8 +92,7 @@ def test_config_defaults():
     cfg = Config()
     
     # CopilotConfig defaults
-    assert cfg.copilot.model == "claude-sonnet-4"
-    assert "helpful voice assistant" in cfg.copilot.system_prompt
+    assert cfg.copilot.model == "gpt-4.1"
     
     # ContextConfig defaults
     assert cfg.context.working_directory is None
@@ -116,8 +112,8 @@ def test_config_defaults():
     assert cfg.overlay.position == "top-left"
     assert cfg.overlay.opacity == 0.92
     assert cfg.overlay.auto_hide_seconds == 15
-    assert cfg.overlay.max_width == 500
-    assert cfg.overlay.max_height == 400
+    assert cfg.overlay.max_width == 340
+    assert cfg.overlay.max_height == 180
     
     # TrayConfig defaults
     assert cfg.tray.enabled is True

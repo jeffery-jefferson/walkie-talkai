@@ -6,8 +6,10 @@ class WalkieTalkAIOverlay {
         this.autoHideTimer = null;
         this.autoHideSeconds = 15;
         this.reconnectAttempts = 0;
-        this.maxReconnectDelay = 30000; // 30 seconds max
+        this.maxReconnectDelay = 30000;
         this.isConnected = false;
+        this.isExpanded = false;
+        this._growTimer = null;
         
         this.init();
     }
@@ -18,6 +20,8 @@ class WalkieTalkAIOverlay {
     }
     
     cacheElements() {
+        this.collapsedTab = document.getElementById('collapsed-tab');
+        this.tabDot = this.collapsedTab.querySelector('.tab-dot');
         this.container = document.getElementById('overlay-container');
         this.statusArea = document.getElementById('status-area');
         this.statusDot = this.statusArea.querySelector('.status-dot');
@@ -62,7 +66,6 @@ class WalkieTalkAIOverlay {
     }
     
     scheduleReconnect() {
-        // Exponential backoff with jitter
         const baseDelay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
         const jitter = Math.random() * 1000;
         const delay = baseDelay + jitter;
@@ -99,6 +102,9 @@ class WalkieTalkAIOverlay {
                 case 'error':
                     this.handleError(data);
                     break;
+                case 'cancelled':
+                    this.handleCancelled(data);
+                    break;
                 case 'hide':
                     this.handleHide();
                     break;
@@ -113,11 +119,14 @@ class WalkieTalkAIOverlay {
     handleStatus(data) {
         this.clearAutoHideTimer();
         
+        // Update tab dot to always reflect current state
+        this.tabDot.className = 'tab-dot ' + (data.state || '');
+        
         switch (data.state) {
             case 'recording':
                 this.statusDot.className = 'status-dot recording';
                 this.statusText.textContent = 'Listening...';
-                this.showOverlay();
+                this.expandOverlay();
                 this.hideError();
                 break;
             case 'processing':
@@ -136,18 +145,18 @@ class WalkieTalkAIOverlay {
     }
     
     handleTranscript(data) {
+        this.transcriptText.className = 'transcript-text';
         this.transcriptText.textContent = data.text;
         this.transcriptArea.classList.remove('hidden');
+        this._growToFitContent();
         this.scrollToBottom();
     }
     
     handleToken(data) {
         if (!data.content) return;
         
-        // Show response area if hidden
         this.responseArea.classList.remove('hidden');
         
-        // Create token element with animation
         const tokenSpan = document.createElement('span');
         tokenSpan.className = 'token';
         tokenSpan.textContent = data.content;
@@ -160,7 +169,6 @@ class WalkieTalkAIOverlay {
     
     handleDone(data) {
         if (data.full_text) {
-            // Re-render with proper markdown formatting
             this.responseContent.innerHTML = this.renderMarkdown(data.full_text);
             this.fullResponse = data.full_text;
         }
@@ -176,11 +184,56 @@ class WalkieTalkAIOverlay {
     }
     
     handleHide() {
-        this.hideOverlay();
+        this.collapseOverlay();
     }
     
-    showOverlay() {
+    handleCancelled(data) {
+        const phrase = data.phrase || '';
+        const fullText = data.full_text || phrase;
+        if (!phrase && !fullText) {
+            // Empty = no speech detected, just silently reset
+            this.collapseOverlay();
+            return;
+        }
+        // Show the full transcript with strikethrough
+        this.transcriptText.className = 'transcript-text cancelled';
+        this.transcriptText.textContent = fullText;
+        this.transcriptArea.classList.remove('hidden');
+        this.responseArea.classList.add('hidden');
+        this.responseContent.innerHTML = '';
+        this.fullResponse = '';
+
+        // Fade out the strikethrough text, then clear for new transcription
+        requestAnimationFrame(() => {
+            this.transcriptText.classList.add('fading');
+        });
+        const onFaded = () => {
+            this.transcriptText.removeEventListener('transitionend', onFaded);
+            this.transcriptText.className = 'transcript-text';
+            this.transcriptText.textContent = '';
+            this.transcriptArea.classList.add('hidden');
+            this.statusText.textContent = 'Ready';
+            this.statusDot.className = 'status-dot idle';
+            this.startAutoHideTimer();
+        };
+        this.transcriptText.addEventListener('transitionend', onFaded);
+        // Fallback if transitionend doesn't fire
+        setTimeout(() => {
+            if (this.transcriptText.classList.contains('fading')) {
+                onFaded();
+            }
+        }, 1000);
+    }
+    
+    // Expand overlay: resize window to full card, show card, hide tab
+    expandOverlay() {
+        if (this.isExpanded) return;
+        this.isExpanded = true;
         this.clearAutoHideTimer();
+        if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
+        
+        // Hide tab, show card
+        this.collapsedTab.classList.add('hidden');
         this.container.classList.remove('hidden');
         
         // Reset content for new session
@@ -189,22 +242,54 @@ class WalkieTalkAIOverlay {
         this.responseContent.innerHTML = '';
         this.fullResponse = '';
         this.hideError();
+        
+        // Resize window via pywebview API
+        this._callAPI('expand');
     }
     
-    hideOverlay() {
+    // Collapse overlay: resize window to tiny tab, show tab, hide card
+    collapseOverlay() {
+        if (!this.isExpanded) return;
+        this.isExpanded = false;
         this.clearAutoHideTimer();
-        this.container.classList.add('hidden');
+        if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
         
-        // Clear content after transition
-        setTimeout(() => {
-            if (this.container.classList.contains('hidden')) {
-                this.transcriptArea.classList.add('hidden');
-                this.responseArea.classList.add('hidden');
-                this.responseContent.innerHTML = '';
-                this.fullResponse = '';
-                this.hideError();
+        // Hide card, show tab
+        this.container.classList.add('hidden');
+        this.collapsedTab.classList.remove('hidden');
+        
+        // Clear content
+        this.transcriptArea.classList.add('hidden');
+        this.responseArea.classList.add('hidden');
+        this.responseContent.innerHTML = '';
+        this.fullResponse = '';
+        this.hideError();
+        
+        // Resize window via pywebview API
+        this._callAPI('collapse');
+    }
+    
+    _callAPI(method, ...args) {
+        // pywebview exposes the js_api object as window.pywebview.api
+        if (window.pywebview && window.pywebview.api && window.pywebview.api[method]) {
+            try {
+                window.pywebview.api[method](...args);
+            } catch (e) {
+                console.warn('pywebview API call failed:', method, e);
             }
-        }, 300);
+        }
+    }
+    
+    _growToFitContent() {
+        // Debounce: wait for DOM to settle before measuring and requesting resize.
+        if (this._growTimer) clearTimeout(this._growTimer);
+        this._growTimer = setTimeout(() => {
+            this._growTimer = null;
+            const needed = document.documentElement.scrollHeight;
+            if (needed > window.innerHeight + 4) { // 4px tolerance
+                this._callAPI('set_height', needed + 16); // +16 breathing room
+            }
+        }, 80);
     }
     
     hideError() {
@@ -214,7 +299,7 @@ class WalkieTalkAIOverlay {
     startAutoHideTimer() {
         this.clearAutoHideTimer();
         this.autoHideTimer = setTimeout(() => {
-            this.hideOverlay();
+            this.collapseOverlay();
         }, this.autoHideSeconds * 1000);
     }
     
@@ -226,6 +311,7 @@ class WalkieTalkAIOverlay {
     }
     
     scrollToBottom() {
+        this.container.scrollTop = this.container.scrollHeight;
         this.responseContent.scrollTop = this.responseContent.scrollHeight;
     }
     
@@ -234,35 +320,23 @@ class WalkieTalkAIOverlay {
         
         let html = text;
         
-        // Escape HTML first
         html = html.replace(/&/g, '&amp;')
                   .replace(/</g, '&lt;')
                   .replace(/>/g, '&gt;');
         
-        // Code blocks (```lang\n...\n```)
         html = html.replace(/```(\w+)?\n?([\s\S]*?)```/g, (match, lang, code) => {
             const langAttr = lang ? ` data-lang="${lang}"` : '';
             return `<pre${langAttr}><code>${code.trim()}</code></pre>`;
         });
         
-        // Inline code (`code`)
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-        
-        // Bold (**text**)
         html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
-        
-        // Italic (*text*)
         html = html.replace(/\*([^\*]+)\*/g, '<em>$1</em>');
-        
-        // Line breaks
         html = html.replace(/\n\n/g, '</p><p>');
         html = html.replace(/\n/g, '<br>');
         
-        // Wrap in paragraphs
         if (html.trim()) {
             html = '<p>' + html + '</p>';
-            
-            // Clean up empty paragraphs
             html = html.replace(/<p><\/p>/g, '');
             html = html.replace(/<p>\s*<\/p>/g, '');
         }
@@ -279,7 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
 // Handle window focus/blur for better UX
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && window.overlay) {
-        // Reconnect if needed when window becomes visible
         if (!window.overlay.isConnected) {
             window.overlay.connectWebSocket();
         }

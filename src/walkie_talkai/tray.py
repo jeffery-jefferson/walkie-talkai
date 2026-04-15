@@ -2,11 +2,15 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+import threading
+import time
+from typing import TYPE_CHECKING, Callable
 
 import PIL.Image
 import PIL.ImageDraw
 import pystray
+
+from walkie_talkai.config import AVAILABLE_MODELS
 
 if TYPE_CHECKING:
     from walkie_talkai.app import WalkieTalkAI
@@ -17,29 +21,48 @@ logger = logging.getLogger(__name__)
 class SystemTray:
     """System tray icon and menu for walkie-talkai."""
     
-    AVAILABLE_MODELS = [
-        "claude-sonnet-4", "claude-sonnet-4.5", "claude-sonnet-4.6",
-        "claude-haiku-4.5", "claude-opus-4.5", "claude-opus-4.6",
-        "gpt-5-mini", "gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.4-mini",
-        "gpt-4.1",
-    ]
-    
-    def __init__(self, app: "WalkieTalkAI", loop: asyncio.AbstractEventLoop):
+    def__init__(self, app: "WalkieTalkAI", loop: asyncio.AbstractEventLoop,
+                 on_quit: "Callable[[], None] | None" = None,
+                 on_restart: "Callable[[], None] | None" = None,
+                 startup_message: str | None = None):
         """
         Args:
             app: The main WalkieTalkAI instance
             loop: The asyncio event loop for scheduling coroutines
+            on_quit: Called when the user requests quit (should destroy the overlay)
+            on_restart: Called when the user requests restart
+            startup_message: If set, shown as a toast notification once the icon appears
         """
         self.app = app
         self.loop = loop
         self.icon = None
-        
+        self._on_quit = on_quit
+        self._on_restart = on_restart
+        self._startup_message = startup_message
+
     def start(self) -> None:
         """Create and start the system tray icon. This blocks (runs pystray's event loop).
         Call from a thread or as the main blocking call."""
         try:
             self.icon = self._create_icon()
             logger.info("Starting system tray icon")
+
+            # Show startup notification after a short delay so the icon is fully
+            # visible before notify() is called.  Using setup= on pystray can
+            # interfere with the Win32 message loop, so we use a daemon thread.
+            if self._startup_message:
+                msg = self._startup_message
+
+                def _notify_later():
+                    time.sleep(1.0)  # wait for icon to appear in tray
+                    try:
+                        if self.icon:
+                            self.icon.notify(msg, "WalkieTalkAI")
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_notify_later, daemon=True).start()
+
             self.icon.run()  # This blocks
         except Exception as e:
             logger.error(f"Error running system tray: {e}", exc_info=True)
@@ -73,6 +96,12 @@ class SystemTray:
             checked=lambda item: self.app.is_running
         )
         
+        # Settings
+        settings_item = pystray.MenuItem(
+            "Settings\u2026",
+            self._open_settings
+        )
+        
         # Reset conversation
         reset_item = pystray.MenuItem(
             "Reset Conversation",
@@ -81,11 +110,11 @@ class SystemTray:
         
         # Switch Model submenu
         model_items = []
-        for model in self.AVAILABLE_MODELS:
+        for model in AVAILABLE_MODELS:
             model_item = pystray.MenuItem(
                 model,
-                lambda icon, item, model=model: self._switch_model(model),
-                checked=lambda item, model=model: getattr(self.app, 'current_model', 'claude-sonnet-4') == model
+                self._make_switch_action(model),
+                checked=self._make_checked(model),
             )
             model_items.append(model_item)
         
@@ -94,7 +123,12 @@ class SystemTray:
             pystray.Menu(*model_items)
         )
         
-        # Quit
+        # Quit / Restart
+        restart_item = pystray.MenuItem(
+            "Restart",
+            self._restart
+        )
+
         quit_item = pystray.MenuItem(
             "Quit",
             self._quit
@@ -103,62 +137,18 @@ class SystemTray:
         return pystray.Menu(
             enable_item,
             pystray.Menu.SEPARATOR,
+            settings_item,
             reset_item,
             switch_model_item,
             pystray.Menu.SEPARATOR,
+            restart_item,
             quit_item
         )
     
     def _create_tray_image(self) -> PIL.Image.Image:
-        """Create a simple programmatic icon for the tray."""
-        # Create a 64x64 image
-        size = 64
-        image = PIL.Image.new('RGBA', (size, size), (0, 0, 0, 0))
-        draw = PIL.ImageDraw.Draw(image)
-        
-        # Color based on enabled state
-        if self.app.is_running:
-            # Green when enabled
-            color = (34, 197, 94, 255)  # Green
-        else:
-            # Gray when disabled
-            color = (107, 114, 128, 255)  # Gray
-        
-        # Draw a simple microphone shape
-        # Main body (rounded rectangle)
-        margin = 8
-        body_width = size - 2 * margin
-        body_height = int(body_width * 0.7)
-        body_x = margin
-        body_y = margin
-        
-        draw.rounded_rectangle(
-            [body_x, body_y, body_x + body_width, body_y + body_height],
-            radius=body_width // 4,
-            fill=color
-        )
-        
-        # Stand (rectangle at bottom)
-        stand_width = body_width // 3
-        stand_height = size - body_y - body_height - margin
-        stand_x = (size - stand_width) // 2
-        stand_y = body_y + body_height
-        
-        draw.rectangle(
-            [stand_x, stand_y, stand_x + stand_width, stand_y + stand_height],
-            fill=color
-        )
-        
-        # Small circle in the center (microphone grille)
-        center_x, center_y = size // 2, body_y + body_height // 2
-        circle_radius = body_width // 6
-        draw.ellipse(
-            [center_x - circle_radius, center_y - circle_radius,
-             center_x + circle_radius, center_y + circle_radius],
-            fill=(255, 255, 255, 200)  # Semi-transparent white
-        )
-        
-        return image
+        """Create the tray icon using the shared app icon."""
+        from walkie_talkai.icon import create_icon_image
+        return create_icon_image(64)
     
     def _toggle_enabled(self, icon, item):
         """Toggle the enabled/disabled state of the app."""
@@ -195,6 +185,11 @@ class SystemTray:
         except Exception as e:
             logger.error(f"Error resetting conversation: {e}", exc_info=True)
     
+    def _open_settings(self, icon, item):
+        """Open the settings window."""
+        from walkie_talkai.settings import open_settings
+        open_settings(self.app.config, app=self.app, loop=self.loop)
+
     def _switch_model(self, model: str):
         """Switch to a different model."""
         try:
@@ -205,22 +200,33 @@ class SystemTray:
             logger.info(f"Switched to model {model} via tray")
         except Exception as e:
             logger.error(f"Error switching to model {model}: {e}", exc_info=True)
+
+    def _make_switch_action(self, model: str):
+        """Create a tray action callback for switching to a specific model."""
+        def action(icon, item):
+            self._switch_model(model)
+        return action
+
+    def _make_checked(self, model: str):
+        """Create a checked callback for a specific model."""
+        def checked(item):
+            return getattr(self.app, 'current_model', 'claude-sonnet-4') == model
+        return checked
     
+    def _restart(self, icon, item):
+        """Restart the application."""
+        logger.info("Restart requested via tray")
+        try:
+            icon.notify("Restarting WalkieTalkAI...", "WalkieTalkAI")
+        except Exception:
+            pass
+        self.stop()
+        if self._on_restart:
+            self._on_restart()
+
     def _quit(self, icon, item):
         """Quit the application."""
         logger.info("Quit requested via tray")
-        try:
-            # Stop the app first
-            if self.app.is_running:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.app.stop(), self.loop
-                )
-                future.result(timeout=5.0)
-            
-            # Then stop the tray icon
-            self.stop()
-            
-        except Exception as e:
-            logger.error(f"Error during quit: {e}", exc_info=True)
-            # Force stop the icon anyway
-            self.stop()
+        self.stop()
+        if self._on_quit:
+            self._on_quit()

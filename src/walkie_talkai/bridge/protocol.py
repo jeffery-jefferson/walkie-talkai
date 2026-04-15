@@ -45,6 +45,13 @@ class HideEvent:
     type: str = "hide"
 
 
+@dataclass
+class CancelledEvent:
+    phrase: str = "scratch that"
+    full_text: str = ""
+    type: str = "cancelled"
+
+
 def to_json(event) -> str:
     return json.dumps(asdict(event))
 
