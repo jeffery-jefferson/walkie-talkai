@@ -15,6 +15,7 @@ class WalkieTalkAIOverlay {
         this._cancelledSpans = []; // array of { text, fading }
         this._idleFadeTimer = null;
         this._hoverExpanded = false;
+        this._suppressIgnoreMouse = false;
         this._configOpacity = 1.0;
 
         // Reasoning panel state
@@ -43,12 +44,15 @@ class WalkieTalkAIOverlay {
 
         // Toggle click-through: visible elements capture mouse,
         // transparent areas pass clicks to windows beneath.
+        // _suppressIgnoreMouse prevents click-through during hover-expand transitions.
         for (const el of [this.collapsedTab, this.container]) {
             el.addEventListener('mouseenter', () => {
                 window.walkieTalkai.setIgnoreMouse(false);
             });
             el.addEventListener('mouseleave', () => {
-                window.walkieTalkai.setIgnoreMouse(true);
+                if (!this._suppressIgnoreMouse) {
+                    window.walkieTalkai.setIgnoreMouse(true);
+                }
             });
         }
 
@@ -56,16 +60,19 @@ class WalkieTalkAIOverlay {
         this.collapsedTab.addEventListener('mouseenter', () => {
             if (!this.isExpanded && this.fullResponse) {
                 this._hoverExpanded = true;
+                // Prevent tab's mouseleave from enabling click-through
+                // during the tab→container transition
+                this._suppressIgnoreMouse = true;
                 this.expandOverlay({ resetContent: false });
             }
         });
 
         // Collapse when mouse leaves the expanded overlay (hover mode only).
-        // Listen on both the container and document body — transparent Electron
-        // windows don't always fire mouseleave on the inner element reliably.
         const onHoverLeave = () => {
             if (this._hoverExpanded) {
                 this._hoverExpanded = false;
+                this._suppressIgnoreMouse = false;
+                window.walkieTalkai.setIgnoreMouse(true);
                 this.collapseOverlay();
             }
         };
