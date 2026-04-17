@@ -60,13 +60,17 @@ class WalkieTalkAIOverlay {
             }
         });
 
-        // Collapse when mouse leaves the expanded container (hover mode only)
-        this.container.addEventListener('mouseleave', () => {
+        // Collapse when mouse leaves the expanded overlay (hover mode only).
+        // Listen on both the container and document body — transparent Electron
+        // windows don't always fire mouseleave on the inner element reliably.
+        const onHoverLeave = () => {
             if (this._hoverExpanded) {
                 this._hoverExpanded = false;
                 this.collapseOverlay();
             }
-        });
+        };
+        this.container.addEventListener('mouseleave', onHoverLeave);
+        document.body.addEventListener('mouseleave', onHoverLeave);
     }
 
     cacheElements() {
