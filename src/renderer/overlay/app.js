@@ -15,7 +15,9 @@ class WalkieTalkAIOverlay {
         this._cancelledSpans = []; // array of { text, fading }
         this._idleFadeTimer = null;
         this._hoverExpanded = false;
-        this._suppressIgnoreMouse = false;
+        this._lastMouseX = 0;
+        this._lastMouseY = 0;
+        this._hoverPollTimer = null;
         this._configOpacity = 1.0;
 
         // Prompt system state
@@ -51,13 +53,13 @@ class WalkieTalkAIOverlay {
 
         // Toggle click-through: visible elements capture mouse,
         // transparent areas pass clicks to windows beneath.
-        // _suppressIgnoreMouse prevents click-through during hover-expand transitions.
         for (const el of [this.collapsedTab, this.container]) {
             el.addEventListener('mouseenter', () => {
                 window.walkieTalkai.setIgnoreMouse(false);
             });
             el.addEventListener('mouseleave', () => {
-                if (!this._suppressIgnoreMouse) {
+                // Don't re-enable click-through during hover-expand transition
+                if (!this._hoverExpanded) {
                     window.walkieTalkai.setIgnoreMouse(true);
                 }
             });
@@ -67,24 +69,46 @@ class WalkieTalkAIOverlay {
         this.collapsedTab.addEventListener('mouseenter', () => {
             if (!this.isExpanded && this.fullResponse) {
                 this._hoverExpanded = true;
-                // Prevent tab's mouseleave from enabling click-through
-                // during the tab→container transition
-                this._suppressIgnoreMouse = true;
+                this.clearAutoHideTimer();
                 this.expandOverlay({ resetContent: false });
+                // Start polling for mouse exit after container appears
+                setTimeout(() => this._startHoverPoll(), 100);
             }
         });
 
-        // Collapse when mouse leaves the expanded overlay (hover mode only).
-        const onHoverLeave = () => {
+        // Detect mouse leaving the overlay while hover-expanded.
+        // Uses a poll interval because transparent Electron windows
+        // don't reliably fire mouseleave on inner elements.
+        this._hoverPollTimer = null;
+        document.addEventListener('mousemove', (e) => {
+            if (!this._hoverExpanded) return;
+            this._lastMouseX = e.clientX;
+            this._lastMouseY = e.clientY;
+        });
+
+        // When mouse leaves the document/window entirely, collapse
+        document.addEventListener('mouseleave', () => {
             if (this._hoverExpanded) {
-                this._hoverExpanded = false;
-                this._suppressIgnoreMouse = false;
-                window.walkieTalkai.setIgnoreMouse(true);
-                this.collapseOverlay();
+                this._endHoverExpand();
             }
+        });
+
+        // Poll: if mouse is outside any visible element, collapse
+        this._startHoverPoll = () => {
+            if (this._hoverPollTimer) return;
+            this._hoverPollTimer = setInterval(() => {
+                if (!this._hoverExpanded) {
+                    clearInterval(this._hoverPollTimer);
+                    this._hoverPollTimer = null;
+                    return;
+                }
+                const el = document.elementFromPoint(this._lastMouseX, this._lastMouseY);
+                // If mouse isn't over any overlay element, collapse
+                if (!el || (!this.container.contains(el) && !this.collapsedTab.contains(el))) {
+                    this._endHoverExpand();
+                }
+            }, 200);
         };
-        this.container.addEventListener('mouseleave', onHoverLeave);
-        document.body.addEventListener('mouseleave', onHoverLeave);
     }
 
     cacheElements() {
@@ -180,6 +204,7 @@ class WalkieTalkAIOverlay {
         switch (data.state) {
             case 'recording':
                 this._hoverExpanded = false;
+                if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
                 this._clearIdleFadeTimer();
                 window.walkieTalkai.setOpacity(this._configOpacity);
                 this.statusDot.className = 'status-dot recording';
@@ -414,6 +439,8 @@ class WalkieTalkAIOverlay {
         // Don't collapse while a prompt is active
         if (this._activePrompt) return;
         this.isExpanded = false;
+        this._hoverExpanded = false;
+        if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
         this.clearAutoHideTimer();
         if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
 
@@ -432,6 +459,15 @@ class WalkieTalkAIOverlay {
             // Don't clear content on collapse — keep it for hover-to-view
             this._startIdleFadeTimer();
         }, 300); // slightly longer than ANIM_DURATION (280ms)
+    }
+
+    /** End a hover-expand: restore click-through and collapse. */
+    _endHoverExpand() {
+        if (!this._hoverExpanded) return;
+        this._hoverExpanded = false;
+        if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
+        window.walkieTalkai.setIgnoreMouse(true);
+        this.collapseOverlay();
     }
 
     _growToFitContent() {
