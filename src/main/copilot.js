@@ -31,7 +31,6 @@ export class CopilotManager {
     this._sessionApprovals = new Map(); // toolName → true  (per-session auto-approvals)
     this._approveAll = false;           // blanket approve for rest of session
     this._pendingPrompts = 0;           // counter for in-flight user prompts
-    this._idleLatchDrain = null;        // callback to drain latched session.idle
   }
 
   get isRunning() {
@@ -124,8 +123,6 @@ export class CopilotManager {
     let done = false;
     let error = null;
     let activeReasoningId = null;
-    let idleLatchedDuringPrompt = false;
-
     const push = (event) => {
       eventQueue.push(event);
       if (resolveWait) { resolveWait(); resolveWait = null; }
@@ -206,30 +203,21 @@ export class CopilotManager {
     });
 
     // Fallback "done" signal — session becomes idle (no pending work).
-    // If we're awaiting user responses to prompts, latch the idle signal
-    // and fire it when the last prompt resolves. The CLI considers
-    // "waiting for user input" as idle, but the turn isn't truly over.
-    const finishIdle = () => {
+    // The SDK fires session.idle while awaiting user permission responses
+    // (the CLI considers "waiting for user input" as idle). We must DISCARD
+    // that idle signal — not latch it — because after the user responds,
+    // the SDK still needs to send the result back to the server, run the
+    // tool, and stream the model's response. The server will fire a fresh
+    // session.idle (or assistant.turn_end) when the turn truly completes.
+    this._idleUnsub = this.session.on('session.idle', () => {
+      if (this._pendingPrompts > 0) {
+        console.log(`[copilot] session.idle ignored — ${this._pendingPrompts} pending prompt(s)`);
+        return;
+      }
       console.log('[copilot] session.idle resolved (fullText.length=' + fullText.length + ')');
       finishReasoningIfActive();
       done = true;
       if (resolveWait) { resolveWait(); resolveWait = null; }
-    };
-
-    this._idleLatchDrain = () => {
-      if (idleLatchedDuringPrompt && this._pendingPrompts === 0) {
-        idleLatchedDuringPrompt = false;
-        finishIdle();
-      }
-    };
-
-    this._idleUnsub = this.session.on('session.idle', () => {
-      if (this._pendingPrompts > 0) {
-        console.log(`[copilot] session.idle latched — ${this._pendingPrompts} pending prompt(s)`);
-        idleLatchedDuringPrompt = true;
-        return;
-      }
-      finishIdle();
     });
 
     // Real error event is "session.error" — "error" does not fire reliably.
@@ -449,7 +437,6 @@ export class CopilotManager {
       }
     } finally {
       this._pendingPrompts--;
-      this._idleLatchDrain?.();
     }
   }
 
@@ -479,7 +466,6 @@ export class CopilotManager {
       };
     } finally {
       this._pendingPrompts--;
-      this._idleLatchDrain?.();
     }
   }
 
@@ -521,7 +507,6 @@ export class CopilotManager {
       return result;
     } finally {
       this._pendingPrompts--;
-      this._idleLatchDrain?.();
     }
   }
 
@@ -564,7 +549,6 @@ export class CopilotManager {
     if (this._turnEndUnsub) { this._turnEndUnsub(); this._turnEndUnsub = null; }
     if (this._idleUnsub) { this._idleUnsub(); this._idleUnsub = null; }
     if (this._errorUnsub) { this._errorUnsub(); this._errorUnsub = null; }
-    this._idleLatchDrain = null;
   }
 
   /**
