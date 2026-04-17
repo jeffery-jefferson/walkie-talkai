@@ -82,6 +82,14 @@
                 <label>Sample Rate
                     <input type="number" id="stt-sample-rate" min="8000" max="48000" step="1000">
                 </label>
+                <label>Hotwords
+                    <div class="mcp-hint" style="margin-bottom:6px;">Words the speech engine should recognize more accurately (e.g. git, npm, copilot)</div>
+                    <div id="hotwords-list" class="phrase-list"></div>
+                    <div class="phrase-add-row">
+                        <input type="text" id="hotword-input" placeholder="Add a hotword...">
+                        <button class="add-btn" id="add-hotword">Add</button>
+                    </div>
+                </label>
             </div>
 
             <!-- Overlay -->

@@ -20,6 +20,7 @@ activation:
 stt:
   model_path: models/sherpa-onnx/kroko-128l-en
   sample_rate: 16000
+  hotwords: []
 
 overlay:
   position: top-left

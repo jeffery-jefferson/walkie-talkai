@@ -158,6 +158,7 @@ function createOverlayWindow() {
   overlayWindow.webContents.once('did-finish-load', () => {
     overlayWindow.webContents.send('overlay-config', {
       auto_hide_seconds: config.overlay.auto_hide_seconds,
+      opacity: config.overlay.opacity,
     });
   });
 
@@ -191,6 +192,11 @@ function registerOverlayIPC() {
     } else {
       overlayWindow.setIgnoreMouseEvents(false);
     }
+  });
+
+  ipcMain.on('overlay-set-opacity', (_event, opacity) => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayWindow.setOpacity(opacity);
   });
 }
 
@@ -449,7 +455,8 @@ async function onConfigChanged(newConfig) {
   // 4. STT model/sample-rate change — expensive, needs engine reload
   if (sttPipeline && (
     config.stt.model_path !== old.stt.model_path ||
-    config.stt.sample_rate !== old.stt.sample_rate
+    config.stt.sample_rate !== old.stt.sample_rate ||
+    JSON.stringify(config.stt.hotwords) !== JSON.stringify(old.stt.hotwords)
   )) {
     try {
       await sttPipeline.reloadEngine();
@@ -476,10 +483,11 @@ async function onConfigChanged(newConfig) {
     expandedHeight = config.overlay.max_height;
   }
 
-  // 8. Overlay auto-hide timer — push to renderer
-  if (config.overlay.auto_hide_seconds !== old.overlay.auto_hide_seconds && overlayWindow && !overlayWindow.isDestroyed()) {
+  // 8. Overlay auto-hide timer and opacity — push to renderer
+  if ((config.overlay.auto_hide_seconds !== old.overlay.auto_hide_seconds || config.overlay.opacity !== old.overlay.opacity) && overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send('overlay-config', {
       auto_hide_seconds: config.overlay.auto_hide_seconds,
+      opacity: config.overlay.opacity,
     });
   }
 

@@ -3,6 +3,7 @@
  */
 
 let cancelPhrases = [];
+let hotwords = [];
 
 // -----------------------------------------------------------------------
 // Hotkey capture — click to record, press keys to set
@@ -164,6 +165,8 @@ async function loadSettings() {
     // Speech tab
     document.getElementById('stt-model-path').value = config.stt.model_path || '';
     document.getElementById('stt-sample-rate').value = config.stt.sample_rate || 16000;
+    hotwords = [...(config.stt.hotwords || [])];
+    renderHotwords();
 
     // Overlay tab
     document.getElementById('overlay-position').value = config.overlay.position || 'top-left';
@@ -203,6 +206,39 @@ document.getElementById('add-cancel-phrase').addEventListener('click', () => {
     if (val && !cancelPhrases.includes(val)) {
         cancelPhrases.push(val);
         renderCancelPhrases();
+        input.value = '';
+    }
+});
+
+// -----------------------------------------------------------------------
+// Hotwords list
+// -----------------------------------------------------------------------
+
+function renderHotwords() {
+    const list = document.getElementById('hotwords-list');
+    list.innerHTML = '';
+    hotwords.forEach((word, idx) => {
+        const item = document.createElement('div');
+        item.className = 'phrase-item';
+        item.innerHTML = `<span>${escapeHtml(word)}</span>`;
+        const btn = document.createElement('button');
+        btn.className = 'phrase-remove';
+        btn.textContent = 'x';
+        btn.addEventListener('click', () => {
+            hotwords.splice(idx, 1);
+            renderHotwords();
+        });
+        item.appendChild(btn);
+        list.appendChild(item);
+    });
+}
+
+document.getElementById('add-hotword').addEventListener('click', () => {
+    const input = document.getElementById('hotword-input');
+    const val = input.value.trim();
+    if (val && !hotwords.includes(val)) {
+        hotwords.push(val);
+        renderHotwords();
         input.value = '';
     }
 });
@@ -257,6 +293,7 @@ function buildConfig() {
         stt: {
             model_path: document.getElementById('stt-model-path').value,
             sample_rate: parseInt(document.getElementById('stt-sample-rate').value, 10),
+            hotwords: [...hotwords],
         },
         overlay: {
             position: document.getElementById('overlay-position').value,

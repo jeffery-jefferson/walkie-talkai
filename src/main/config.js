@@ -48,6 +48,7 @@ const DEFAULTS = {
   stt: {
     model_path: 'models/sherpa-onnx/kroko-128l-en',
     sample_rate: 16000,
+    hotwords: [],
   },
   overlay: {
     position: 'top-left',
@@ -112,6 +113,11 @@ export function validate(cfg) {
   }
   if (!Number.isInteger(cfg.overlay?.max_height) || cfg.overlay.max_height <= 0) {
     throw new Error('overlay.max_height must be a positive integer');
+  }
+  if (cfg.stt?.hotwords !== undefined) {
+    if (!Array.isArray(cfg.stt.hotwords) || !cfg.stt.hotwords.every((w) => typeof w === 'string')) {
+      throw new Error('stt.hotwords must be an array of strings');
+    }
   }
   if (cfg.context?.custom_instructions && !fs.existsSync(cfg.context.custom_instructions)) {
     throw new Error(`custom_instructions file not found: ${cfg.context.custom_instructions}`);
