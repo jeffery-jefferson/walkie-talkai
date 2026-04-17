@@ -60,9 +60,11 @@ export class SttEngine {
       this._hotwordsFile = hotwordsFilePath;
     }
 
+    // Hotwords require modified_beam_search decoding
+    const useHotwords = hotwordsFilePath.length > 0;
     const baseConfig = {
       featConfig: { sampleRate, featureDim: 80 },
-      decodingMethod: 'greedy_search',
+      decodingMethod: useHotwords ? 'modified_beam_search' : 'greedy_search',
       enableEndpoint: true,
       rule1MinTrailingSilence: 2.4,
       rule2MinTrailingSilence: 1.2,
