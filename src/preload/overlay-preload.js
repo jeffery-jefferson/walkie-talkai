@@ -32,4 +32,19 @@ contextBridge.exposeInMainWorld('walkieTalkai', {
 
   /** Set the overlay window opacity (0.0–1.0). */
   setOpacity: (opacity) => ipcRenderer.send('overlay-set-opacity', opacity),
+
+  // -- Prompt system (permissions, user input, elicitation) --
+
+  /** Subscribe to prompt requests from the main process. */
+  onPrompt: (callback) => {
+    ipcRenderer.on('overlay-prompt', (_event, data) => callback(data));
+  },
+
+  /** Send the user's response to a prompt back to the main process. */
+  respondPrompt: (requestId, response) => {
+    ipcRenderer.send('overlay-prompt-response', requestId, response);
+  },
+
+  /** Notify main process that overlay entered/exited interactive mode. */
+  setInteractive: (active) => ipcRenderer.send('overlay-set-interactive', active),
 });

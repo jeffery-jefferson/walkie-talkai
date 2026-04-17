@@ -23,6 +23,7 @@ import {
   DoneEvent, ErrorEvent, CancelledEvent,
   ReasoningEvent, ReasoningStartEvent, ReasoningEndEvent,
   ToolStartEvent, ToolCompleteEvent,
+  PermissionPromptEvent, UserInputPromptEvent, ElicitationPromptEvent,
 } from './protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,6 +56,11 @@ let configWatcher = null;
 let isEnabled = true;
 let requestGen = 0; // stale response counter
 
+// Prompt system state — pending promises keyed by requestId
+const pendingPrompts = new Map();
+let promptCounter = 0;
+const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min for permissions
+
 // ---------------------------------------------------------------------------
 // Send event to overlay renderer
 // ---------------------------------------------------------------------------
@@ -63,6 +69,77 @@ function sendOverlayEvent(event) {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send('overlay-event', event);
   }
+}
+
+/**
+ * Send a prompt to the overlay and return a Promise that resolves with the
+ * user's response. Used as the copilot prompt handler.
+ */
+function sendOverlayPrompt(request) {
+  return new Promise((resolve, reject) => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      // No overlay → can't ask user, deny permissions / cancel elicitation
+      if (request.promptType === 'permission') {
+        resolve({ action: 'allow' }); // safe fallback
+      } else {
+        resolve({ action: 'cancel' });
+      }
+      return;
+    }
+
+    const requestId = `prompt-${++promptCounter}`;
+    let timer = null;
+
+    // Timeout for permissions only (5 min)
+    if (request.promptType === 'permission') {
+      timer = setTimeout(() => {
+        pendingPrompts.delete(requestId);
+        resolve({ action: 'deny', feedback: 'Timed out waiting for user response' });
+      }, PERMISSION_TIMEOUT_MS);
+    }
+
+    pendingPrompts.set(requestId, { resolve, reject, timer, promptType: request.promptType });
+
+    // Build the appropriate protocol event
+    let event;
+    switch (request.promptType) {
+      case 'permission':
+        event = PermissionPromptEvent(requestId, request.kind, {
+          toolName: request.toolName,
+          ...request.details,
+        });
+        break;
+      case 'user_input':
+        event = UserInputPromptEvent(requestId, request.question, request.choices, request.allowFreeform);
+        break;
+      case 'elicitation':
+        event = ElicitationPromptEvent(
+          requestId, request.message, request.requestedSchema,
+          request.mode, request.url, request.source,
+        );
+        break;
+      default:
+        resolve({ action: 'cancel' });
+        return;
+    }
+
+    overlayWindow.webContents.send('overlay-prompt', event);
+  });
+}
+
+/**
+ * Flush all pending prompts (e.g. on session reset, app quit).
+ */
+function flushPendingPrompts() {
+  for (const [id, pending] of pendingPrompts) {
+    clearTimeout(pending.timer);
+    if (pending.promptType === 'permission') {
+      pending.resolve({ action: 'deny', feedback: 'Session reset' });
+    } else {
+      pending.resolve({ action: 'cancel' });
+    }
+  }
+  pendingPrompts.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -180,8 +257,11 @@ function registerOverlayIPC() {
 
   ipcMain.on('overlay-set-height', (_event, h) => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    // Only resize if window is already at expanded width (not collapsed tab)
+    const [curW] = overlayWindow.getSize();
+    if (curW <= TAB_WIDTH) return;
     const bounded = Math.min(Math.max(h, TAB_HEIGHT), expandedHeight);
-    const [curW, curH] = overlayWindow.getSize();
+    const [, curH] = overlayWindow.getSize();
     animateResize(overlayWindow, curW, curH, expandedWidth, bounded);
   });
 
@@ -197,6 +277,31 @@ function registerOverlayIPC() {
   ipcMain.on('overlay-set-opacity', (_event, opacity) => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
     overlayWindow.setOpacity(opacity);
+  });
+
+  // Interactive mode toggle — prompt system needs keyboard focus
+  ipcMain.on('overlay-set-interactive', (_event, active) => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    if (active) {
+      overlayWindow.setFocusable(true);
+      overlayWindow.setIgnoreMouseEvents(false);
+      overlayWindow.focus();
+    } else {
+      overlayWindow.setFocusable(false);
+      overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
+  });
+
+  // Prompt response from overlay renderer
+  ipcMain.on('overlay-prompt-response', (event, requestId, response) => {
+    // Validate sender — only accept from overlay window
+    if (!overlayWindow || event.sender !== overlayWindow.webContents) return;
+    const pending = pendingPrompts.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingPrompts.delete(requestId);
+      pending.resolve(response);
+    }
   });
 }
 
@@ -426,6 +531,7 @@ async function onConfigChanged(newConfig) {
       const { merged: mcpServers } = loadAllMcpServers(config.mcp?.external_config_path);
       await copilot.stop();
       await copilot.init(config.copilot.model, systemPrompt, mcpServers);
+      copilot.setPromptHandler(sendOverlayPrompt);
     } catch (err) {
       console.error('Copilot session reinit failed:', err.message);
     }
@@ -579,6 +685,7 @@ app.whenReady().then(async () => {
       console.log(`Loading ${serverCount} MCP server(s): ${Object.keys(mcpServers).join(', ')}`);
     }
     await copilot.init(config.copilot.model, systemPrompt, mcpServers);
+    copilot.setPromptHandler(sendOverlayPrompt);
   } catch (err) {
     console.error('Copilot init failed:', err.message);
     startupErrors.push(`Copilot: ${err.message}`);
@@ -637,6 +744,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', async () => {
   if (animTimer) clearInterval(animTimer);
+  flushPendingPrompts();
   configWatcher?.stop();
   sttPipeline?.stop();
   try { await copilot?.stop(); } catch { /* ignore */ }

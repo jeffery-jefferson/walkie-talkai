@@ -4,7 +4,7 @@
  * Absorbs the logic from sidecar/session.mjs into the main process.
  */
 
-import { CopilotClient, approveAll } from '@github/copilot-sdk';
+import { CopilotClient } from '@github/copilot-sdk';
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 2000;
@@ -25,6 +25,11 @@ export class CopilotManager {
     this._idleUnsub = null;
     this._errorUnsub = null;
     this._running = false;
+
+    // Prompt system state
+    this._promptHandler = null;       // (request) => Promise<response>  set by main.js
+    this._sessionApprovals = new Map(); // toolName → true  (per-session auto-approvals)
+    this._approveAll = false;           // blanket approve for rest of session
   }
 
   get isRunning() {
@@ -56,7 +61,9 @@ export class CopilotManager {
     const sessionOpts = {
       model,
       streaming: true,
-      onPermissionRequest: approveAll,
+      onPermissionRequest: (req, inv) => this._handlePermission(req, inv),
+      onUserInputRequest: (req, inv) => this._handleUserInput(req, inv),
+      onElicitationRequest: (ctx) => this._handleElicitation(ctx),
       systemMessage: { mode: 'replace', content: systemPrompt },
     };
     if (this._mcpServers && Object.keys(this._mcpServers).length > 0) {
@@ -297,6 +304,7 @@ export class CopilotManager {
 
   async reset() {
     if (!this.session) return;
+    this.clearSessionApprovals();
 
     const model = this._model;
     const systemPrompt = this._systemPrompt;
@@ -307,7 +315,9 @@ export class CopilotManager {
     const sessionOpts = {
       model,
       streaming: true,
-      onPermissionRequest: approveAll,
+      onPermissionRequest: (req, inv) => this._handlePermission(req, inv),
+      onUserInputRequest: (req, inv) => this._handleUserInput(req, inv),
+      onElicitationRequest: (ctx) => this._handleElicitation(ctx),
       systemMessage: { mode: 'replace', content: systemPrompt },
     };
     if (this._mcpServers && Object.keys(this._mcpServers).length > 0) {
@@ -342,6 +352,161 @@ export class CopilotManager {
       }
     }
     throw new Error('Copilot restart failed after max retries');
+  }
+
+  // -----------------------------------------------------------------------
+  // Prompt system — interactive permissions, user input, elicitation
+  // -----------------------------------------------------------------------
+
+  /**
+   * Set the handler that sends prompts to the overlay and returns responses.
+   * Called by main.js during setup.
+   * @param {(request: object) => Promise<object>} handler
+   */
+  setPromptHandler(handler) {
+    this._promptHandler = handler;
+  }
+
+  /** Clear per-session tool approvals. Called on session reset/restart. */
+  clearSessionApprovals() {
+    this._sessionApprovals.clear();
+    this._approveAll = false;
+  }
+
+  /**
+   * SDK permission handler — checks cache, then delegates to overlay prompt.
+   * @param {object} request  { kind, toolCallId, toolName?, ...details }
+   * @param {object} invocation  { sessionId }
+   * @returns {Promise<object>} PermissionRequestResult
+   */
+  async _handlePermission(request, _invocation) {
+    const toolKey = request.toolName || request.kind;
+
+    // Check blanket approval
+    if (this._approveAll) {
+      return { kind: 'approved' };
+    }
+
+    // Check per-tool session approval
+    if (this._sessionApprovals.has(toolKey)) {
+      return { kind: 'approved' };
+    }
+
+    // No prompt handler = auto-approve (fallback)
+    if (!this._promptHandler) {
+      return { kind: 'approved' };
+    }
+
+    // Delegate to overlay
+    const response = await this._promptHandler({
+      promptType: 'permission',
+      kind: request.kind,
+      toolName: toolKey,
+      details: { ...request },
+    });
+
+    switch (response.action) {
+      case 'allow':
+        return { kind: 'approved' };
+      case 'allow_session':
+        this._sessionApprovals.set(toolKey, true);
+        return { kind: 'approved' };
+      case 'allow_all':
+        this._approveAll = true;
+        return { kind: 'approved' };
+      case 'deny':
+      default:
+        return {
+          kind: 'denied-interactively-by-user',
+          ...(response.feedback ? { feedback: response.feedback } : {}),
+        };
+    }
+  }
+
+  /**
+   * SDK user-input handler — shows a question in the overlay.
+   * @param {object} request  { question, choices?, allowFreeform? }
+   * @param {object} invocation  { sessionId }
+   * @returns {Promise<object>} UserInputResponse
+   */
+  async _handleUserInput(request, _invocation) {
+    if (!this._promptHandler) {
+      return { answer: '', wasFreeform: true };
+    }
+
+    const response = await this._promptHandler({
+      promptType: 'user_input',
+      question: request.question,
+      choices: request.choices || null,
+      allowFreeform: request.allowFreeform !== false,
+    });
+
+    return {
+      answer: response.answer || '',
+      wasFreeform: !!response.wasFreeform,
+    };
+  }
+
+  /**
+   * SDK elicitation handler — shows a form or opens a URL.
+   * @param {object} context  { sessionId, message, requestedSchema?, mode?, url?, elicitationSource? }
+   * @returns {Promise<object>} ElicitationResult
+   */
+  async _handleElicitation(context) {
+    // URL mode: open in default browser, let user accept/cancel
+    if (context.mode === 'url' && context.url) {
+      const { shell } = await import('electron');
+      shell.openExternal(context.url);
+    }
+
+    if (!this._promptHandler) {
+      return { action: 'cancel' };
+    }
+
+    const response = await this._promptHandler({
+      promptType: 'elicitation',
+      message: context.message,
+      requestedSchema: context.requestedSchema || null,
+      mode: context.mode || 'form',
+      url: context.url || null,
+      source: context.elicitationSource || null,
+    });
+
+    // Validate response action
+    const validActions = ['accept', 'decline', 'cancel'];
+    const action = validActions.includes(response.action) ? response.action : 'cancel';
+
+    const result = { action };
+    if (action === 'accept' && response.content) {
+      result.content = this._validateElicitationContent(response.content, context.requestedSchema);
+    }
+    return result;
+  }
+
+  /**
+   * Validate/coerce elicitation form values against the schema before
+   * returning to the SDK. Drops unknown fields, coerces types.
+   */
+  _validateElicitationContent(content, schema) {
+    if (!schema || !schema.properties) return content;
+
+    const validated = {};
+    for (const [key, fieldSchema] of Object.entries(schema.properties)) {
+      if (!(key in content)) continue;
+      const val = content[key];
+
+      if (fieldSchema.type === 'boolean') {
+        validated[key] = val === true || val === 'true';
+      } else if (fieldSchema.type === 'number' || fieldSchema.type === 'integer') {
+        const num = Number(val);
+        if (!isNaN(num)) validated[key] = fieldSchema.type === 'integer' ? Math.round(num) : num;
+      } else if (fieldSchema.type === 'array') {
+        validated[key] = Array.isArray(val) ? val.map(String) : [];
+      } else {
+        validated[key] = String(val);
+      }
+    }
+    return validated;
   }
 
   // -----------------------------------------------------------------------

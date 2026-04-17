@@ -18,6 +18,10 @@ class WalkieTalkAIOverlay {
         this._suppressIgnoreMouse = false;
         this._configOpacity = 1.0;
 
+        // Prompt system state
+        this._promptQueue = [];      // FIFO queue of pending prompt events
+        this._activePrompt = null;   // Currently displayed prompt { requestId, promptType, ... }
+
         // Reasoning panel state
         this._reasoningActive = false;
         this._reasoningStartTime = 0;
@@ -31,6 +35,9 @@ class WalkieTalkAIOverlay {
 
         // Listen for events from the main process via IPC bridge.
         window.walkieTalkai.onEvent((data) => this.handleEvent(data));
+
+        // Listen for prompt requests (permissions, user input, elicitation).
+        window.walkieTalkai.onPrompt((data) => this.enqueuePrompt(data));
 
         // Live config updates from main process (auto_hide_seconds, opacity, etc).
         window.walkieTalkai.onConfig((data) => {
@@ -100,6 +107,10 @@ class WalkieTalkAIOverlay {
         this.reasoningContent = document.getElementById('reasoning-content');
         this.toolArea = document.getElementById('tool-area');
         this.toolList = document.getElementById('tool-list');
+        this.promptArea = document.getElementById('prompt-area');
+        this.promptMessage = document.getElementById('prompt-message');
+        this.promptBody = document.getElementById('prompt-body');
+        this.promptActions = document.getElementById('prompt-actions');
 
         // Click-to-expand the reasoning panel
         this.reasoningToggle.addEventListener('click', () => {
@@ -356,6 +367,13 @@ class WalkieTalkAIOverlay {
         this.collapsedTab.classList.add('hidden');
 
         if (resetContent) {
+            // Don't reset content if a prompt is showing
+            if (this._activePrompt) {
+                resetContent = false;
+            }
+        }
+
+        if (resetContent) {
             // Reset content for new session
             this._cancelledSpans = [];
             this.transcriptArea.classList.add('hidden');
@@ -393,6 +411,8 @@ class WalkieTalkAIOverlay {
 
     collapseOverlay() {
         if (!this.isExpanded) return;
+        // Don't collapse while a prompt is active
+        if (this._activePrompt) return;
         this.isExpanded = false;
         this.clearAutoHideTimer();
         if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
@@ -415,10 +435,13 @@ class WalkieTalkAIOverlay {
     }
 
     _growToFitContent() {
+        // Only grow when expanded — prevent ghost window after collapse
+        if (!this.isExpanded) return;
         // Debounce: wait for DOM to settle before measuring and requesting resize.
         if (this._growTimer) clearTimeout(this._growTimer);
         this._growTimer = setTimeout(() => {
             this._growTimer = null;
+            if (!this.isExpanded) return; // re-check after debounce
             const needed = document.documentElement.scrollHeight;
             if (needed > window.innerHeight + 4) { // 4px tolerance
                 window.walkieTalkai.setHeight(needed + 16); // +16 breathing room
@@ -479,6 +502,7 @@ class WalkieTalkAIOverlay {
     }
 
     startAutoHideTimer() {
+        if (this._activePrompt) return; // don't auto-hide with prompt active
         this.clearAutoHideTimer();
         this.autoHideTimer = setTimeout(() => {
             this.collapseOverlay();
@@ -524,6 +548,415 @@ class WalkieTalkAIOverlay {
         }
 
         return html;
+    }
+
+    // -----------------------------------------------------------------------
+    // Prompt system — permissions, user input, elicitation
+    // -----------------------------------------------------------------------
+
+    /**
+     * Add a prompt to the queue. If no prompt is active, show it immediately.
+     */
+    enqueuePrompt(data) {
+        if (this._activePrompt) {
+            this._promptQueue.push(data);
+            return;
+        }
+        this._showPrompt(data);
+    }
+
+    /**
+     * Display a prompt in the overlay. Expands and switches to interactive mode.
+     */
+    _showPrompt(data) {
+        this._activePrompt = data;
+        this.clearAutoHideTimer();
+        this._clearIdleFadeTimer();
+        window.walkieTalkai.setOpacity(this._configOpacity);
+
+        // Expand overlay if collapsed
+        if (!this.isExpanded) {
+            this.expandOverlay({ resetContent: false });
+        }
+
+        // Enter interactive mode (focusable, no click-through)
+        window.walkieTalkai.setInteractive(true);
+
+        // Render based on prompt type
+        switch (data.promptType) {
+            case 'permission':
+                this._renderPermissionPrompt(data);
+                break;
+            case 'user_input':
+                this._renderUserInputPrompt(data);
+                break;
+            case 'elicitation':
+                this._renderElicitationPrompt(data);
+                break;
+        }
+
+        this.promptArea.classList.remove('hidden');
+        this._growToFitContent();
+        this.scrollToBottom();
+    }
+
+    /**
+     * Send response and advance to next queued prompt or restore overlay state.
+     */
+    _dismissPrompt(response) {
+        if (!this._activePrompt) return;
+        const requestId = this._activePrompt.requestId;
+
+        window.walkieTalkai.respondPrompt(requestId, response);
+
+        // Clear prompt UI
+        this.promptArea.classList.add('hidden');
+        this.promptMessage.innerHTML = '';
+        this.promptBody.innerHTML = '';
+        this.promptActions.innerHTML = '';
+        this._activePrompt = null;
+
+        // Show next queued prompt or exit interactive mode
+        if (this._promptQueue.length > 0) {
+            this._showPrompt(this._promptQueue.shift());
+        } else {
+            window.walkieTalkai.setInteractive(false);
+            this._growToFitContent();
+            this.startAutoHideTimer();
+        }
+    }
+
+    // -- Permission prompt --------------------------------------------------
+
+    _renderPermissionPrompt(data) {
+        const kind = data.kind || 'unknown';
+        const toolName = data.details?.toolName || kind;
+
+        // Build message with badge
+        this.promptMessage.innerHTML =
+            `<div class="prompt-kind-badge permission">Permission</div>` +
+            `<div><strong>${this._escapeHtml(toolName)}</strong> wants to execute a ` +
+            `<em>${this._escapeHtml(kind)}</em> action.</div>`;
+
+        // Details
+        this.promptBody.innerHTML = this._renderPermissionDetails(data);
+
+        // Action buttons
+        this.promptActions.innerHTML = '';
+        const actions = [
+            { label: 'Allow', cls: 'allow', action: 'allow' },
+            { label: 'Deny', cls: 'deny', action: 'deny' },
+            { label: 'Allow for Session', cls: 'session', action: 'allow_session' },
+            { label: 'Allow All', cls: 'all', action: 'allow_all' },
+        ];
+
+        for (const a of actions) {
+            const btn = document.createElement('button');
+            btn.className = `prompt-btn ${a.cls}`;
+            btn.textContent = a.label;
+            btn.addEventListener('click', () => {
+                if (a.action === 'deny') {
+                    this._showDenyFeedback();
+                } else {
+                    this._dismissPrompt({ action: a.action });
+                }
+            });
+            this.promptActions.appendChild(btn);
+        }
+    }
+
+    _renderPermissionDetails(data) {
+        const details = data.details || {};
+        const parts = [];
+        if (details.command) parts.push(`<strong>Command:</strong> <code>${this._escapeHtml(String(details.command))}</code>`);
+        if (details.path) parts.push(`<strong>Path:</strong> <code>${this._escapeHtml(String(details.path))}</code>`);
+        if (details.url) parts.push(`<strong>URL:</strong> <code>${this._escapeHtml(String(details.url))}</code>`);
+        return parts.length > 0
+            ? `<div style="font-size:11px;color:#a6adc8;line-height:1.5">${parts.join('<br>')}</div>`
+            : '';
+    }
+
+    _showDenyFeedback() {
+        // Replace buttons with feedback textarea + confirm deny
+        this.promptActions.innerHTML = '';
+
+        const fb = document.createElement('div');
+        fb.className = 'prompt-feedback-area';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'prompt-text-input';
+        textarea.placeholder = 'Reason for denying (optional)';
+        textarea.rows = 2;
+        fb.appendChild(textarea);
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'prompt-btn deny';
+        confirmBtn.textContent = 'Confirm Deny';
+        confirmBtn.addEventListener('click', () => {
+            this._dismissPrompt({ action: 'deny', feedback: textarea.value || undefined });
+        });
+        fb.appendChild(confirmBtn);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'prompt-btn';
+        cancelBtn.textContent = 'Back';
+        cancelBtn.addEventListener('click', () => {
+            this._renderPermissionPrompt(this._activePrompt);
+        });
+        fb.appendChild(cancelBtn);
+
+        this.promptActions.appendChild(fb);
+        textarea.focus();
+        this._growToFitContent();
+    }
+
+    // -- User input prompt --------------------------------------------------
+
+    _renderUserInputPrompt(data) {
+        this.promptMessage.innerHTML =
+            `<div class="prompt-kind-badge user-input">Question</div>` +
+            `<div>${this._escapeHtml(data.question)}</div>`;
+
+        this.promptBody.innerHTML = '';
+        this.promptActions.innerHTML = '';
+
+        // Choice buttons
+        if (data.choices && data.choices.length > 0) {
+            for (const choice of data.choices) {
+                const btn = document.createElement('button');
+                btn.className = 'prompt-choice-btn';
+                btn.textContent = choice;
+                btn.addEventListener('click', () => {
+                    this._dismissPrompt({ answer: choice, wasFreeform: false });
+                });
+                this.promptBody.appendChild(btn);
+            }
+        }
+
+        // Freeform text input
+        if (data.allowFreeform) {
+            const inputArea = document.createElement('div');
+            inputArea.style.marginTop = '6px';
+
+            const textarea = document.createElement('textarea');
+            textarea.className = 'prompt-text-input';
+            textarea.placeholder = 'Type your answer...';
+            textarea.rows = 2;
+            inputArea.appendChild(textarea);
+
+            const submitBtn = document.createElement('button');
+            submitBtn.className = 'prompt-btn allow';
+            submitBtn.textContent = 'Submit';
+            submitBtn.style.marginTop = '4px';
+            submitBtn.addEventListener('click', () => {
+                this._dismissPrompt({ answer: textarea.value, wasFreeform: true });
+            });
+            inputArea.appendChild(submitBtn);
+
+            // Allow Enter to submit (Shift+Enter for newline)
+            textarea.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this._dismissPrompt({ answer: textarea.value, wasFreeform: true });
+                }
+            });
+
+            this.promptBody.appendChild(inputArea);
+            setTimeout(() => textarea.focus(), 60);
+        }
+
+        // Cancel button
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'prompt-btn deny';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+            this._dismissPrompt({ answer: '', wasFreeform: true });
+        });
+        this.promptActions.appendChild(cancelBtn);
+    }
+
+    // -- Elicitation prompt (form-based) ------------------------------------
+
+    _renderElicitationPrompt(data) {
+        const source = data.source ? ` (${this._escapeHtml(data.source)})` : '';
+        this.promptMessage.innerHTML =
+            `<div class="prompt-kind-badge elicitation">Form${source}</div>` +
+            `<div>${this._escapeHtml(data.message)}</div>`;
+
+        this.promptBody.innerHTML = '';
+        this.promptActions.innerHTML = '';
+
+        // URL mode: show a link and Accept/Cancel
+        if (data.mode === 'url' && data.url) {
+            const link = document.createElement('div');
+            link.innerHTML = `<div style="font-size:11px;color:#a6adc8;margin-bottom:6px">` +
+                `A URL has been opened in your browser.</div>`;
+            this.promptBody.appendChild(link);
+        }
+
+        // Form fields from schema
+        const formValues = {};
+        if (data.requestedSchema && data.requestedSchema.properties) {
+            for (const [key, field] of Object.entries(data.requestedSchema.properties)) {
+                const fieldEl = this._renderFormField(key, field, formValues);
+                this.promptBody.appendChild(fieldEl);
+            }
+        }
+
+        // Accept / Decline / Cancel buttons
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'prompt-btn allow';
+        acceptBtn.textContent = 'Accept';
+        acceptBtn.addEventListener('click', () => {
+            this._dismissPrompt({ action: 'accept', content: { ...formValues } });
+        });
+        this.promptActions.appendChild(acceptBtn);
+
+        const declineBtn = document.createElement('button');
+        declineBtn.className = 'prompt-btn deny';
+        declineBtn.textContent = 'Decline';
+        declineBtn.addEventListener('click', () => {
+            this._dismissPrompt({ action: 'decline' });
+        });
+        this.promptActions.appendChild(declineBtn);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'prompt-btn';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+            this._dismissPrompt({ action: 'cancel' });
+        });
+        this.promptActions.appendChild(cancelBtn);
+    }
+
+    /**
+     * Render a single form field and bind its value to formValues[key].
+     */
+    _renderFormField(key, field, formValues) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'prompt-form-field';
+
+        // Label
+        const label = document.createElement('label');
+        label.textContent = field.title || key;
+        wrapper.appendChild(label);
+
+        // Description
+        if (field.description) {
+            const desc = document.createElement('div');
+            desc.className = 'field-description';
+            desc.textContent = field.description;
+            wrapper.appendChild(desc);
+        }
+
+        // Set default
+        if (field.default !== undefined) {
+            formValues[key] = field.default;
+        }
+
+        if (field.type === 'boolean') {
+            const checkDiv = document.createElement('div');
+            checkDiv.className = 'prompt-form-checkbox';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!field.default;
+            formValues[key] = !!field.default;
+            cb.addEventListener('change', () => { formValues[key] = cb.checked; });
+            const cbLabel = document.createElement('span');
+            cbLabel.textContent = field.title || key;
+            checkDiv.appendChild(cb);
+            checkDiv.appendChild(cbLabel);
+            wrapper.appendChild(checkDiv);
+        } else if (field.enum) {
+            // Dropdown select
+            const sel = document.createElement('select');
+            for (const opt of field.enum) {
+                const o = document.createElement('option');
+                o.value = opt;
+                o.textContent = (field.enumNames && field.enumNames[field.enum.indexOf(opt)]) || opt;
+                sel.appendChild(o);
+            }
+            sel.value = field.default || field.enum[0];
+            formValues[key] = sel.value;
+            sel.addEventListener('change', () => { formValues[key] = sel.value; });
+            wrapper.appendChild(sel);
+        } else if (field.oneOf) {
+            // Radio-style dropdown
+            const sel = document.createElement('select');
+            for (const opt of field.oneOf) {
+                const o = document.createElement('option');
+                o.value = opt.const;
+                o.textContent = opt.title;
+                sel.appendChild(o);
+            }
+            sel.value = field.default || field.oneOf[0].const;
+            formValues[key] = sel.value;
+            sel.addEventListener('change', () => { formValues[key] = sel.value; });
+            wrapper.appendChild(sel);
+        } else if (field.type === 'array') {
+            // Multi-select checkboxes
+            const msDiv = document.createElement('div');
+            msDiv.className = 'prompt-form-multi-select';
+            formValues[key] = Array.isArray(field.default) ? [...field.default] : [];
+
+            const items = field.items?.enum || field.items?.anyOf?.map(a => a.const) || [];
+            const itemLabels = field.items?.anyOf?.map(a => a.title) || items;
+
+            for (let i = 0; i < items.length; i++) {
+                const itemLabel = document.createElement('label');
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = items[i];
+                cb.checked = formValues[key].includes(items[i]);
+                cb.addEventListener('change', () => {
+                    if (cb.checked) {
+                        if (!formValues[key].includes(cb.value)) formValues[key].push(cb.value);
+                    } else {
+                        formValues[key] = formValues[key].filter(v => v !== cb.value);
+                    }
+                });
+                itemLabel.appendChild(cb);
+                itemLabel.appendChild(document.createTextNode(' ' + (itemLabels[i] || items[i])));
+                msDiv.appendChild(itemLabel);
+            }
+            wrapper.appendChild(msDiv);
+        } else if (field.type === 'number' || field.type === 'integer') {
+            const input = document.createElement('input');
+            input.type = 'number';
+            if (field.minimum !== undefined) input.min = field.minimum;
+            if (field.maximum !== undefined) input.max = field.maximum;
+            if (field.type === 'integer') input.step = 1;
+            input.value = field.default !== undefined ? field.default : '';
+            formValues[key] = field.default !== undefined ? field.default : 0;
+            input.addEventListener('input', () => {
+                const v = field.type === 'integer' ? parseInt(input.value) : parseFloat(input.value);
+                formValues[key] = isNaN(v) ? 0 : v;
+            });
+            wrapper.appendChild(input);
+        } else {
+            // String input
+            const input = document.createElement('input');
+            input.type = field.format === 'email' ? 'email'
+                       : field.format === 'uri' ? 'url'
+                       : field.format === 'date' ? 'date'
+                       : field.format === 'date-time' ? 'datetime-local'
+                       : 'text';
+            input.value = field.default || '';
+            input.placeholder = field.title || key;
+            formValues[key] = field.default || '';
+            input.addEventListener('input', () => { formValues[key] = input.value; });
+            wrapper.appendChild(input);
+        }
+
+        return wrapper;
+    }
+
+    // -- Utilities ----------------------------------------------------------
+
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 

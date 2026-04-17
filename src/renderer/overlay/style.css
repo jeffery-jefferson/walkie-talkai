@@ -547,3 +547,240 @@ html, body {
 .hidden {
     display: none !important;
 }
+
+/* -----------------------------------------------------------------------
+   Prompt system — permissions, user input, elicitation forms
+   ----------------------------------------------------------------------- */
+
+.prompt-area {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(30, 30, 46, 0.95);
+    border: 1px solid rgba(137, 180, 250, 0.3);
+    border-radius: 8px;
+}
+
+.prompt-message {
+    font-size: 12px;
+    color: #cdd6f4;
+    margin-bottom: 8px;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.prompt-message .prompt-kind-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    background: rgba(137, 180, 250, 0.2);
+    color: #89b4fa;
+}
+
+.prompt-message .prompt-kind-badge.permission { background: rgba(250, 179, 135, 0.2); color: #fab387; }
+.prompt-message .prompt-kind-badge.user-input { background: rgba(166, 227, 161, 0.2); color: #a6e3a1; }
+.prompt-message .prompt-kind-badge.elicitation { background: rgba(180, 190, 254, 0.2); color: #b4befe; }
+
+.prompt-body {
+    margin-bottom: 8px;
+}
+
+/* Prompt action buttons — stacked vertically */
+.prompt-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.prompt-btn {
+    display: block;
+    width: 100%;
+    padding: 7px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.prompt-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.prompt-btn.allow {
+    background: rgba(166, 227, 161, 0.15);
+    border-color: rgba(166, 227, 161, 0.3);
+    color: #a6e3a1;
+}
+.prompt-btn.allow:hover {
+    background: rgba(166, 227, 161, 0.25);
+}
+
+.prompt-btn.deny {
+    background: rgba(243, 139, 168, 0.1);
+    border-color: rgba(243, 139, 168, 0.2);
+    color: #f38ba8;
+}
+.prompt-btn.deny:hover {
+    background: rgba(243, 139, 168, 0.2);
+}
+
+.prompt-btn.session {
+    background: rgba(137, 180, 250, 0.1);
+    border-color: rgba(137, 180, 250, 0.2);
+    color: #89b4fa;
+}
+.prompt-btn.session:hover {
+    background: rgba(137, 180, 250, 0.2);
+}
+
+.prompt-btn.all {
+    background: rgba(250, 179, 135, 0.1);
+    border-color: rgba(250, 179, 135, 0.2);
+    color: #fab387;
+}
+.prompt-btn.all:hover {
+    background: rgba(250, 179, 135, 0.2);
+}
+
+/* Choice buttons for user input */
+.prompt-choice-btn {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    border: 1px solid rgba(137, 180, 250, 0.2);
+    border-radius: 6px;
+    background: rgba(137, 180, 250, 0.06);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.prompt-choice-btn:hover {
+    background: rgba(137, 180, 250, 0.15);
+    border-color: rgba(137, 180, 250, 0.3);
+}
+
+/* Freeform text input */
+.prompt-text-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 32px;
+    max-height: 120px;
+    box-sizing: border-box;
+}
+
+.prompt-text-input:focus {
+    outline: none;
+    border-color: rgba(137, 180, 250, 0.4);
+}
+
+.prompt-text-input::placeholder {
+    color: rgba(205, 214, 244, 0.4);
+}
+
+/* Feedback textarea for deny action */
+.prompt-feedback-area {
+    margin-top: 4px;
+}
+
+.prompt-feedback-area .prompt-text-input {
+    margin-bottom: 4px;
+}
+
+/* Elicitation form fields */
+.prompt-form-field {
+    margin-bottom: 8px;
+}
+
+.prompt-form-field label {
+    display: block;
+    font-size: 11px;
+    color: #a6adc8;
+    margin-bottom: 3px;
+    font-weight: 500;
+}
+
+.prompt-form-field .field-description {
+    font-size: 10px;
+    color: rgba(166, 173, 200, 0.7);
+    margin-bottom: 3px;
+}
+
+.prompt-form-field select {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-family: inherit;
+}
+
+.prompt-form-field input[type="text"],
+.prompt-form-field input[type="number"],
+.prompt-form-field input[type="email"],
+.prompt-form-field input[type="date"],
+.prompt-form-field input[type="datetime-local"] {
+    width: 100%;
+    padding: 5px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #cdd6f4;
+    font-size: 12px;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.prompt-form-field input:focus,
+.prompt-form-field select:focus {
+    outline: none;
+    border-color: rgba(137, 180, 250, 0.4);
+}
+
+.prompt-form-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.prompt-form-checkbox input[type="checkbox"] {
+    accent-color: #89b4fa;
+}
+
+.prompt-form-multi-select {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.prompt-form-multi-select label {
+    font-size: 12px;
+    color: #cdd6f4;
+    font-weight: normal;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
