@@ -1,0 +1,549 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 13px;
+    color: #ffffff;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+}
+
+/* Collapsed tab — pill shown when idle */
+.collapsed-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100px;
+    height: 24px;
+    background: #1e1e2e;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: default;
+    padding: 0 10px;
+    animation: tabAppear 0.25s ease;
+}
+
+@keyframes tabAppear {
+    from { opacity: 0; transform: scale(0.8); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.collapsed-tab.hidden {
+    display: none;
+}
+
+.tab-label {
+    font-size: 9px;
+    font-weight: 500;
+    color: #9ca3af;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.tab-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+    transition: background 0.3s ease;
+}
+
+.tab-dot.idle {
+    background: #10b981;
+}
+
+.tab-dot.recording {
+    background: #ef4444;
+    animation: pulse 2s infinite;
+}
+
+.tab-dot.processing {
+    animation: strobePulse 1s ease-in-out infinite;
+}
+
+/* Main overlay container — the window IS the card */
+.overlay-container {
+    width: 100%;
+    height: 100%;
+    background: #14141e;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px;
+    overflow-y: auto;
+    opacity: 1;
+    animation: cardAppear 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.overlay-container.hidden {
+    display: none;
+}
+
+.overlay-container.collapsing {
+    animation: cardDisappear 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    pointer-events: none;
+}
+
+@keyframes cardDisappear {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+}
+
+@keyframes cardAppear {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Status area */
+.status-area {
+    margin-bottom: 4px;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #6b7280;
+    transition: all 0.3s ease;
+}
+
+.status-dot.recording {
+    background: #ef4444;
+    animation: pulse 2s infinite;
+}
+
+.status-dot.processing {
+    animation: strobePulse 1s ease-in-out infinite;
+}
+
+.status-dot.idle {
+    background: #10b981;
+}
+
+.status-text {
+    font-size: 11px;
+    font-weight: 500;
+    color: #d1d5db;
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Strobe between blue and purple — signals "actively thinking" when the
+   agent may be paused on a long tool call or model wait. */
+@keyframes strobePulse {
+    0%, 100% {
+        background: #3b82f6;    /* blue */
+        box-shadow: 0 0 4px rgba(59, 130, 246, 0.6);
+    }
+    50% {
+        background: #a855f7;    /* purple */
+        box-shadow: 0 0 8px rgba(168, 85, 247, 0.9);
+    }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Transcript area */
+.transcript-area {
+    margin-bottom: 6px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    border-left: 3px solid #6366f1;
+    animation: fadeInUp 0.3s ease;
+}
+
+.transcript-area.hidden {
+    display: none;
+}
+
+.transcript-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.transcript-text {
+    font-style: italic;
+    color: #e5e7eb;
+    line-height: 1.3;
+}
+
+/* Inline cancelled span — struck-through, fades out, text shifts to fill */
+.cancelled-span {
+    font-style: normal;
+    color: #f87171;
+    text-decoration: line-through;
+    opacity: 0.7;
+    display: inline;
+    transition: opacity 1.5s ease-out, font-size 1.5s ease-out, margin 1.5s ease-out;
+}
+
+.cancelled-span.fading {
+    opacity: 0;
+    font-size: 0;
+    margin: 0;
+}
+
+/* Active speech span — appears after cancelled text */
+.active-span {
+    display: inline;
+    color: #e5e7eb;
+    font-style: italic;
+}
+
+/* Reasoning area — collapsible "thinking..." panel */
+.reasoning-area {
+    margin-bottom: 6px;
+    animation: fadeInUp 0.3s ease;
+}
+.reasoning-area.hidden {
+    display: none;
+}
+
+.reasoning-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 8px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 6px;
+    color: #93c5fd;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s, border-color 0.2s;
+}
+.reasoning-toggle:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.reasoning-caret {
+    display: inline-block;
+    font-size: 8px;
+    transition: transform 0.15s ease;
+    color: #60a5fa;
+}
+.reasoning-area.expanded .reasoning-caret {
+    transform: rotate(90deg);
+}
+
+.reasoning-label {
+    flex: 1;
+    text-align: left;
+}
+.reasoning-label.thinking {
+    animation: strobeText 1.4s ease-in-out infinite;
+}
+.reasoning-label.thinking::after {
+    content: '...';
+    display: inline-block;
+    animation: thinkingDots 1.4s infinite;
+    width: 14px;
+    text-align: left;
+}
+
+@keyframes strobeText {
+    0%, 100% { color: #60a5fa; }    /* blue */
+    50%      { color: #c084fc; }    /* purple */
+}
+@keyframes thinkingDots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+.reasoning-timer {
+    font-size: 10px;
+    color: #6b7280;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.reasoning-content {
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border-left: 3px solid #3b82f6;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #cbd5e1;
+    font-family: inherit;
+    max-height: 180px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.reasoning-content.hidden {
+    display: none;
+}
+.reasoning-content::-webkit-scrollbar {
+    width: 4px;
+}
+.reasoning-content::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.4);
+    border-radius: 2px;
+}
+
+/* Tool activity list — one row per tool call */
+.tool-area {
+    margin-bottom: 6px;
+    animation: fadeInUp 0.3s ease;
+}
+.tool-area.hidden {
+    display: none;
+}
+
+.tool-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.tool-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: rgba(168, 85, 247, 0.08);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    border-radius: 4px;
+    font-size: 11px;
+    color: #c4b5fd;
+    line-height: 1.3;
+}
+
+.tool-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #a855f7;
+}
+.tool-item.running .tool-status {
+    animation: spin 1s linear infinite;
+    background: #a855f7;
+    border: 1.5px solid #a855f7;
+    border-top-color: transparent;
+}
+.tool-item.success .tool-status {
+    background: #10b981;
+}
+.tool-item.failure .tool-status {
+    background: #ef4444;
+}
+
+.tool-name {
+    font-weight: 600;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    color: #e9d5ff;
+}
+
+.tool-label {
+    color: #9ca3af;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Response area */
+.response-area {
+    animation: fadeInUp 0.3s ease;
+}
+
+.response-area.hidden {
+    display: none;
+}
+
+.response-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.response-content {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    line-height: 1.4;
+    color: #f3f4f6;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+}
+
+/* Custom scrollbar for webkit browsers */
+.response-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.response-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.response-content::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.3);
+    border-radius: 2px;
+}
+
+.response-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(156, 163, 175, 0.5);
+}
+
+/* Typography in responses */
+.response-content p {
+    margin-bottom: 6px;
+}
+
+.response-content p:last-child {
+    margin-bottom: 0;
+}
+
+.response-content strong {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.response-content em {
+    color: #fbbf24;
+}
+
+/* Code styling */
+.response-content code {
+    background: rgba(0, 0, 0, 0.4);
+    color: #fbbf24;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 11px;
+}
+
+.response-content pre {
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 8px;
+    margin: 6px 0;
+    overflow-x: auto;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.response-content pre code {
+    background: none;
+    padding: 0;
+    color: #e5e7eb;
+    border-radius: 0;
+}
+
+/* Error area */
+.error-area {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    margin-top: 8px;
+    animation: fadeInUp 0.3s ease;
+}
+
+.error-area.hidden {
+    display: none;
+}
+
+.error-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+    color: #ef4444;
+    font-weight: 700;
+}
+
+.error-message {
+    color: #fecaca;
+    font-size: 12px;
+    line-height: 1.3;
+}
+
+/* Token streaming animation */
+.token {
+    animation: tokenAppear 0.2s ease;
+}
+
+@keyframes tokenAppear {
+    from {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Utility classes */
+.hidden {
+    display: none !important;
+}
