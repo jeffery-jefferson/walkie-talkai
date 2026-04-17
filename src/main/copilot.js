@@ -30,6 +30,8 @@ export class CopilotManager {
     this._promptHandler = null;       // (request) => Promise<response>  set by main.js
     this._sessionApprovals = new Map(); // toolName → true  (per-session auto-approvals)
     this._approveAll = false;           // blanket approve for rest of session
+    this._pendingPrompts = 0;           // counter for in-flight user prompts
+    this._idleLatchDrain = null;        // callback to drain latched session.idle
   }
 
   get isRunning() {
@@ -122,6 +124,7 @@ export class CopilotManager {
     let done = false;
     let error = null;
     let activeReasoningId = null;
+    let idleLatchedDuringPrompt = false;
 
     const push = (event) => {
       eventQueue.push(event);
@@ -202,12 +205,31 @@ export class CopilotManager {
       if (resolveWait) { resolveWait(); resolveWait = null; }
     });
 
-    // Fallback "done" signal — session becomes idle (no pending work)
-    this._idleUnsub = this.session.on('session.idle', () => {
-      console.log('[copilot] session.idle received (fullText.length=' + fullText.length + ')');
+    // Fallback "done" signal — session becomes idle (no pending work).
+    // If we're awaiting user responses to prompts, latch the idle signal
+    // and fire it when the last prompt resolves. The CLI considers
+    // "waiting for user input" as idle, but the turn isn't truly over.
+    const finishIdle = () => {
+      console.log('[copilot] session.idle resolved (fullText.length=' + fullText.length + ')');
       finishReasoningIfActive();
       done = true;
       if (resolveWait) { resolveWait(); resolveWait = null; }
+    };
+
+    this._idleLatchDrain = () => {
+      if (idleLatchedDuringPrompt && this._pendingPrompts === 0) {
+        idleLatchedDuringPrompt = false;
+        finishIdle();
+      }
+    };
+
+    this._idleUnsub = this.session.on('session.idle', () => {
+      if (this._pendingPrompts > 0) {
+        console.log(`[copilot] session.idle latched — ${this._pendingPrompts} pending prompt(s)`);
+        idleLatchedDuringPrompt = true;
+        return;
+      }
+      finishIdle();
     });
 
     // Real error event is "session.error" — "error" does not fire reliably.
@@ -305,6 +327,7 @@ export class CopilotManager {
   async reset() {
     if (!this.session) return;
     this.clearSessionApprovals();
+    this._pendingPrompts = 0;
 
     const model = this._model;
     const systemPrompt = this._systemPrompt;
@@ -397,29 +420,36 @@ export class CopilotManager {
       return { kind: 'approved' };
     }
 
-    // Delegate to overlay
-    const response = await this._promptHandler({
-      promptType: 'permission',
-      kind: request.kind,
-      toolName: toolKey,
-      details: { ...request },
-    });
+    // Delegate to overlay — track pending count so session.idle doesn't
+    // prematurely terminate the generator while we await user input.
+    this._pendingPrompts++;
+    try {
+      const response = await this._promptHandler({
+        promptType: 'permission',
+        kind: request.kind,
+        toolName: toolKey,
+        details: { ...request },
+      });
 
-    switch (response.action) {
-      case 'allow':
-        return { kind: 'approved' };
-      case 'allow_session':
-        this._sessionApprovals.set(toolKey, true);
-        return { kind: 'approved' };
-      case 'allow_all':
-        this._approveAll = true;
-        return { kind: 'approved' };
-      case 'deny':
-      default:
-        return {
-          kind: 'denied-interactively-by-user',
-          ...(response.feedback ? { feedback: response.feedback } : {}),
-        };
+      switch (response.action) {
+        case 'allow':
+          return { kind: 'approved' };
+        case 'allow_session':
+          this._sessionApprovals.set(toolKey, true);
+          return { kind: 'approved' };
+        case 'allow_all':
+          this._approveAll = true;
+          return { kind: 'approved' };
+        case 'deny':
+        default:
+          return {
+            kind: 'denied-interactively-by-user',
+            ...(response.feedback ? { feedback: response.feedback } : {}),
+          };
+      }
+    } finally {
+      this._pendingPrompts--;
+      this._idleLatchDrain?.();
     }
   }
 
@@ -434,17 +464,23 @@ export class CopilotManager {
       return { answer: '', wasFreeform: true };
     }
 
-    const response = await this._promptHandler({
-      promptType: 'user_input',
-      question: request.question,
-      choices: request.choices || null,
-      allowFreeform: request.allowFreeform !== false,
-    });
+    this._pendingPrompts++;
+    try {
+      const response = await this._promptHandler({
+        promptType: 'user_input',
+        question: request.question,
+        choices: request.choices || null,
+        allowFreeform: request.allowFreeform !== false,
+      });
 
-    return {
-      answer: response.answer || '',
-      wasFreeform: !!response.wasFreeform,
-    };
+      return {
+        answer: response.answer || '',
+        wasFreeform: !!response.wasFreeform,
+      };
+    } finally {
+      this._pendingPrompts--;
+      this._idleLatchDrain?.();
+    }
   }
 
   /**
@@ -463,24 +499,30 @@ export class CopilotManager {
       return { action: 'cancel' };
     }
 
-    const response = await this._promptHandler({
-      promptType: 'elicitation',
-      message: context.message,
-      requestedSchema: context.requestedSchema || null,
-      mode: context.mode || 'form',
-      url: context.url || null,
-      source: context.elicitationSource || null,
-    });
+    this._pendingPrompts++;
+    try {
+      const response = await this._promptHandler({
+        promptType: 'elicitation',
+        message: context.message,
+        requestedSchema: context.requestedSchema || null,
+        mode: context.mode || 'form',
+        url: context.url || null,
+        source: context.elicitationSource || null,
+      });
 
-    // Validate response action
-    const validActions = ['accept', 'decline', 'cancel'];
-    const action = validActions.includes(response.action) ? response.action : 'cancel';
+      // Validate response action
+      const validActions = ['accept', 'decline', 'cancel'];
+      const action = validActions.includes(response.action) ? response.action : 'cancel';
 
-    const result = { action };
-    if (action === 'accept' && response.content) {
-      result.content = this._validateElicitationContent(response.content, context.requestedSchema);
+      const result = { action };
+      if (action === 'accept' && response.content) {
+        result.content = this._validateElicitationContent(response.content, context.requestedSchema);
+      }
+      return result;
+    } finally {
+      this._pendingPrompts--;
+      this._idleLatchDrain?.();
     }
-    return result;
   }
 
   /**
@@ -522,6 +564,7 @@ export class CopilotManager {
     if (this._turnEndUnsub) { this._turnEndUnsub(); this._turnEndUnsub = null; }
     if (this._idleUnsub) { this._idleUnsub(); this._idleUnsub = null; }
     if (this._errorUnsub) { this._errorUnsub(); this._errorUnsub = null; }
+    this._idleLatchDrain = null;
   }
 
   /**

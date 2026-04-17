@@ -66,9 +66,11 @@ class WalkieTalkAIOverlay {
         }
 
         // Hover on collapsed tab to view previous output
-        this.collapsedTab.addEventListener('mouseenter', () => {
+        this.collapsedTab.addEventListener('mouseenter', (e) => {
             if (!this.isExpanded && this.fullResponse) {
                 this._hoverExpanded = true;
+                this._lastMouseX = e.clientX;
+                this._lastMouseY = e.clientY;
                 this.clearAutoHideTimer();
                 this.expandOverlay({ resetContent: false });
                 // Start polling for mouse exit after container appears
@@ -76,12 +78,12 @@ class WalkieTalkAIOverlay {
             }
         });
 
-        // Detect mouse leaving the overlay while hover-expanded.
-        // Uses a poll interval because transparent Electron windows
-        // don't reliably fire mouseleave on inner elements.
+        // Track mouse position for hover-expand polling.
+        // Always update — the poll needs fresh coords even if hover hasn't started yet.
+        this._lastMouseX = 0;
+        this._lastMouseY = 0;
         this._hoverPollTimer = null;
         document.addEventListener('mousemove', (e) => {
-            if (!this._hoverExpanded) return;
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
         });
