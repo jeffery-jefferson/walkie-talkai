@@ -35,7 +35,10 @@ export function validateServer(name, cfg) {
     throw new Error(`MCP server "${name}": config must be an object`);
   }
 
-  // tools — required, must be string array
+  // tools — optional, defaults to ["*"] (all tools); must be string array if provided
+  if (cfg.tools === undefined) {
+    cfg.tools = ['*'];
+  }
   if (!Array.isArray(cfg.tools)) {
     throw new Error(`MCP server "${name}": "tools" must be an array of strings (use ["*"] for all)`);
   }
