@@ -194,21 +194,25 @@ export class CopilotManager {
       });
     });
 
-    // Primary "done" signal — fires when the assistant finishes its turn
+    // Turn boundary — fires after each assistant turn. In multi-turn agentic
+    // flows the model may execute several turns (tool calls → server round-trip
+    // → next turn) before the conversation is truly complete. We must NOT set
+    // `done` here — otherwise the generator exits prematurely on tool-only
+    // turns and the pipeline throws "no response" while the SDK continues.
     this._turnEndUnsub = this.session.on('assistant.turn_end', () => {
       console.log('[copilot] assistant.turn_end received');
       finishReasoningIfActive();
-      done = true;
+      // Wake the generator so queued events are yielded, but do NOT break.
       if (resolveWait) { resolveWait(); resolveWait = null; }
     });
 
-    // Fallback "done" signal — session becomes idle (no pending work).
+    // True "done" signal — session becomes idle (no pending work).
     // The SDK fires session.idle while awaiting user permission responses
     // (the CLI considers "waiting for user input" as idle). We must DISCARD
     // that idle signal — not latch it — because after the user responds,
     // the SDK still needs to send the result back to the server, run the
     // tool, and stream the model's response. The server will fire a fresh
-    // session.idle (or assistant.turn_end) when the turn truly completes.
+    // session.idle when the conversation truly completes.
     this._idleUnsub = this.session.on('session.idle', () => {
       if (this._pendingPrompts > 0) {
         console.log(`[copilot] session.idle ignored — ${this._pendingPrompts} pending prompt(s)`);
