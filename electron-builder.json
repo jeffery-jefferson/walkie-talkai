@@ -23,6 +23,11 @@
       "filter": ["**/*", "!node_modules/**"]
     }
   ],
+  "publish": {
+    "provider": "github",
+    "owner": "jeffery-jefferson",
+    "repo": "walkie-talkai"
+  },
   "win": {
     "target": "nsis",
     "icon": "assets/icon.ico"

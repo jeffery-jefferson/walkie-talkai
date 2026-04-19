@@ -23,6 +23,11 @@ export class SystemTray {
    * @param {(model: string) => void} opts.onSwitchModel
    * @param {() => void} opts.onRestart
    * @param {() => void} opts.onQuit
+   * @param {() => string} [opts.updateStatus]
+   * @param {() => string|null} [opts.updateVersion]
+   * @param {() => void} [opts.onCheckForUpdates]
+   * @param {() => void} [opts.onDownloadUpdate]
+   * @param {() => void} [opts.onInstallUpdate]
    */
   constructor(opts) {
     this._opts = opts;
@@ -62,8 +67,11 @@ export class SystemTray {
     const {
       isEnabled, currentModel, onToggle, onSettings, onReset,
       onSwitchModel, onOpenLog, onRestart, onQuit,
+      updateStatus, updateVersion, onCheckForUpdates, onDownloadUpdate, onInstallUpdate,
     } = this._opts;
     const enabled = isEnabled();
+    const status = updateStatus?.() || 'disabled';
+    const version = updateVersion?.();
 
     const modelSubmenu = AVAILABLE_MODELS.map((m) => ({
       label: m,
@@ -72,6 +80,8 @@ export class SystemTray {
       click: () => onSwitchModel(m),
     }));
 
+    const updateItems = _buildUpdateItems(status, version, { onCheckForUpdates, onDownloadUpdate, onInstallUpdate });
+
     const menu = Menu.buildFromTemplate([
       { label: enabled ? 'Enabled' : 'Disabled', type: 'checkbox', checked: enabled, click: () => onToggle(!enabled) },
       { type: 'separator' },
@@ -79,6 +89,7 @@ export class SystemTray {
       { label: 'Reset Conversation', click: onReset },
       { label: 'Switch Model', submenu: modelSubmenu },
       { label: 'Open Log File', click: onOpenLog },
+      ...updateItems,
       { type: 'separator' },
       { label: 'Restart', click: onRestart },
       { label: 'Quit', click: onQuit },
@@ -86,4 +97,30 @@ export class SystemTray {
 
     this._tray.setContextMenu(menu);
   }
+}
+
+function _buildUpdateItems(status, version, { onCheckForUpdates, onDownloadUpdate, onInstallUpdate }) {
+  const statusItem = {
+    disabled:    { label: 'Updates (dev mode)', enabled: false },
+    idle:        null,
+    checking:    { label: 'Checking for updates...', enabled: false },
+    'up-to-date': { label: '✓ Up to date', enabled: false },
+    available:   { label: `Update available (v${version})`, enabled: false },
+    downloading: { label: 'Downloading update...', enabled: false },
+    ready:       { label: `✓ Update ready (v${version})`, enabled: false },
+    error:       { label: '✗ Update check failed', enabled: false },
+  }[status] ?? null;
+
+  const actionItem = {
+    disabled:    null,
+    idle:        { label: 'Check for Updates', click: onCheckForUpdates },
+    'up-to-date': { label: 'Check for Updates', click: onCheckForUpdates },
+    error:       { label: 'Check for Updates', click: onCheckForUpdates },
+    checking:    { label: 'Check for Updates', enabled: false },
+    available:   { label: 'Download Update', click: onDownloadUpdate },
+    downloading: { label: 'Download Update', enabled: false },
+    ready:       { label: 'Restart to Update', click: onInstallUpdate },
+  }[status] ?? null;
+
+  return [statusItem, actionItem].filter(Boolean);
 }

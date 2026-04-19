@@ -18,6 +18,7 @@ import { SystemTray } from './tray.js';
 import { SttPipeline } from './stt-pipeline.js';
 import { CopilotManager } from './copilot.js';
 import { registerSettingsIPC, registerMcpIPC } from './ipc-handlers.js';
+import { AppUpdater } from './updater.js';
 import {
   StatusEvent, TranscriptEvent, TokenEvent,
   DoneEvent, ErrorEvent, CancelledEvent,
@@ -50,6 +51,7 @@ let expandedHeight = 260;
 let animTimer = null;
 
 let tray = null;
+let updater = null;
 let sttPipeline = null;
 let copilot = null;
 let configWatcher = null;
@@ -658,7 +660,17 @@ app.whenReady().then(async () => {
   // 3. Create overlay window
   createOverlayWindow();
 
-  // 4. Start system tray
+  // 4. Initialize auto-updater
+  updater = new AppUpdater({
+    onStatusChange: () => {
+      if (tray) tray.rebuildMenu();
+    },
+    onNotify: (title, message) => {
+      if (tray) tray.notify(title, message);
+    },
+  });
+
+  // 5. Start system tray
   tray = new SystemTray({
     isEnabled: () => isEnabled,
     currentModel: () => copilot?.currentModel || config.copilot.model,
@@ -686,15 +698,24 @@ app.whenReady().then(async () => {
         console.error('Failed to open log file:', err.message);
       });
     },
+    updateStatus: () => updater?.status || 'disabled',
+    updateVersion: () => updater?.updateVersion || null,
+    onCheckForUpdates: () => updater?.checkForUpdates(),
+    onDownloadUpdate: () => updater?.downloadUpdate(),
+    onInstallUpdate: () => updater?.installUpdate(),
     onRestart: () => {
-      app.relaunch();
-      app.quit();
+      if (updater?.status === 'ready') {
+        updater.installUpdate();
+      } else {
+        app.relaunch();
+        app.quit();
+      }
     },
     onQuit: () => app.quit(),
   });
   tray.start();
 
-  // 5. Start Copilot
+  // 6. Start Copilot
   copilot = new CopilotManager();
   const startupErrors = [];
   try {
@@ -714,7 +735,7 @@ app.whenReady().then(async () => {
     startupErrors.push(`Copilot: ${err.message}`);
   }
 
-  // 6. Start STT pipeline
+  // 7. Start STT pipeline
   sttPipeline = new SttPipeline({
     config,
     onRecordingStart: () => {
@@ -745,16 +766,21 @@ app.whenReady().then(async () => {
     startupErrors.push(`STT: ${err.message}`);
   }
 
-  // 7. Start config watcher
+  // 8. Start config watcher
   configWatcher = new ConfigWatcher(getUserConfigPath(), onConfigChanged);
   configWatcher.start();
 
-  // 8. Startup notification
+  // 9. Startup notification
   const msg = startupErrors.length > 0
     ? `Started with errors:\n${startupErrors.join('\n')}`
     : 'WalkieTalkAI started';
   console.log(msg);
   setTimeout(() => tray?.notify('WalkieTalkAI', msg), 1000);
+
+  // 10. Auto-check for updates after startup
+  setTimeout(() => {
+    updater?.checkForUpdates();
+  }, 5000);
 });
 
 // ---------------------------------------------------------------------------
