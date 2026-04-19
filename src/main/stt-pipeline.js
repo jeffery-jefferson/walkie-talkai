@@ -9,13 +9,25 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { app } from 'electron';
 import { AudioCapture } from './audio-capture.js';
 import { SttEngine } from './stt-engine.js';
 import { HotkeyActivation } from './hotkey.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * Return the root directory for extra resources (models).
+ * In packaged builds, extraResources land under process.resourcesPath;
+ * in dev, they're relative to the project root.
+ */
+function getResourceRoot() {
+  if (app.isPackaged) {
+    return process.resourcesPath;
+  }
+  return path.resolve(__dirname, '..', '..');
+}
 
 export class SttPipeline {
   /**
@@ -56,10 +68,10 @@ export class SttPipeline {
 
   /** Initialize STT model, audio capture, and start hotkey listener. */
   async start() {
-    // Resolve model path relative to project root if relative
+    // Resolve model path relative to resource root if relative
     let modelPath = this.config.stt.model_path;
     if (!path.isAbsolute(modelPath)) {
-      modelPath = path.join(PROJECT_ROOT, modelPath);
+      modelPath = path.join(getResourceRoot(), modelPath);
     }
 
     console.log(`Initializing STT with model at ${modelPath}`);
@@ -128,7 +140,7 @@ export class SttPipeline {
 
     let modelPath = this.config.stt.model_path;
     if (!path.isAbsolute(modelPath)) {
-      modelPath = path.join(PROJECT_ROOT, modelPath);
+      modelPath = path.join(getResourceRoot(), modelPath);
     }
     console.log(`Reloading STT engine with model at ${modelPath}`);
 

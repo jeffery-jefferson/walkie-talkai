@@ -4,6 +4,15 @@ export class SessionManager {
   constructor() {
     this.client = null;
     this.session = null;
+    this._deltaUnsub = null;
+    this._idleUnsub = null;
+    this._errorUnsub = null;
+  }
+
+  _cleanupListeners() {
+    if (this._deltaUnsub) { this._deltaUnsub(); this._deltaUnsub = null; }
+    if (this._idleUnsub) { this._idleUnsub(); this._idleUnsub = null; }
+    if (this._errorUnsub) { this._errorUnsub(); this._errorUnsub = null; }
   }
 
   async init(model, systemPrompt) {
@@ -33,11 +42,13 @@ export class SessionManager {
     }
 
     try {
+      // Clean up any listeners from a previous in-flight request
+      this._cleanupListeners();
+
       let fullText = "";
-      let unsubDelta = null;
 
       // Set up token streaming
-      unsubDelta = this.session.on("assistant.message_delta", (e) => {
+      this._deltaUnsub = this.session.on("assistant.message_delta", (e) => {
         const chunk = e.data.deltaContent;
         if (chunk) {
           fullText += chunk;
@@ -47,14 +58,12 @@ export class SessionManager {
 
       // Wait for session to become idle (completion)
       const idle = new Promise((resolve, reject) => {
-        const unsubIdle = this.session.on("session.idle", () => {
-          unsubIdle();
+        this._idleUnsub = this.session.on("session.idle", () => {
           resolve();
         });
 
         // Add error handling
-        const unsubError = this.session.on("error", (error) => {
-          unsubError();
+        this._errorUnsub = this.session.on("error", (error) => {
           reject(error);
         });
       });
@@ -65,13 +74,12 @@ export class SessionManager {
       // Wait for completion
       await idle;
       
-      // Clean up event listener
-      if (unsubDelta) {
-        unsubDelta();
-      }
+      // Clean up event listeners
+      this._cleanupListeners();
 
       return fullText;
     } catch (error) {
+      this._cleanupListeners();
       console.error("SessionManager send error:", error);
       throw new Error(`Failed to send prompt: ${error.message}`);
     }

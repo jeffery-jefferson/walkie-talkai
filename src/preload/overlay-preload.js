@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('walkieTalkai', {
   /** Set the overlay window opacity (0.0–1.0). */
   setOpacity: (opacity) => ipcRenderer.send('overlay-set-opacity', opacity),
 
+  /** Start/stop main-process cursor polling for mouse-exit detection. */
+  hoverWatch: (active) => ipcRenderer.send('overlay-hover-watch', active),
+
   // -- Prompt system (permissions, user input, elicitation) --
 
   /** Subscribe to prompt requests from the main process. */

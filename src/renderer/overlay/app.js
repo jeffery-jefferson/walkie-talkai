@@ -15,9 +15,8 @@ class WalkieTalkAIOverlay {
         this._cancelledSpans = []; // array of { text, fading }
         this._idleFadeTimer = null;
         this._hoverExpanded = false;
-        this._lastMouseX = 0;
-        this._lastMouseY = 0;
-        this._hoverPollTimer = null;
+        this._mouseOnContainer = false;
+        this._collapseOnLeave = false;
         this._configOpacity = 1.0;
 
         // Prompt system state
@@ -65,52 +64,42 @@ class WalkieTalkAIOverlay {
             });
         }
 
-        // Hover on collapsed tab to view previous output
-        this.collapsedTab.addEventListener('mouseenter', (e) => {
-            if (!this.isExpanded && this.fullResponse) {
-                this._hoverExpanded = true;
-                this._lastMouseX = e.clientX;
-                this._lastMouseY = e.clientY;
+        // Hover on expanded overlay: cancel auto-hide, collapse on leave
+        this.container.addEventListener('mouseenter', () => {
+            this._mouseOnContainer = true;
+            if (this.autoHideTimer) {
                 this.clearAutoHideTimer();
-                this.expandOverlay({ resetContent: false });
-                // Start polling for mouse exit after container appears
-                setTimeout(() => this._startHoverPoll(), 100);
+                this._collapseOnLeave = true;
+                window.walkieTalkai.hoverWatch(true);
+            }
+        });
+        this.container.addEventListener('mouseleave', () => {
+            this._mouseOnContainer = false;
+            if (this._hoverExpanded) {
+                this._endHoverExpand();
+            } else if (this._collapseOnLeave) {
+                this._collapseOnLeave = false;
+                this.collapseOverlay();
             }
         });
 
-        // Track mouse position for hover-expand polling.
-        // Always update — the poll needs fresh coords even if hover hasn't started yet.
-        this._lastMouseX = 0;
-        this._lastMouseY = 0;
-        this._hoverPollTimer = null;
-        document.addEventListener('mousemove', (e) => {
-            this._lastMouseX = e.clientX;
-            this._lastMouseY = e.clientY;
+        // Hover on collapsed tab to view previous output
+        this.collapsedTab.addEventListener('mouseenter', () => {
+            if (!this.isExpanded && this.fullResponse) {
+                this._hoverExpanded = true;
+                this.clearAutoHideTimer();
+                this.expandOverlay({ resetContent: false });
+                // Main-process cursor polling detects mouse exit reliably
+                window.walkieTalkai.hoverWatch(true);
+            }
         });
 
-        // When mouse leaves the document/window entirely, collapse
+        // Fallback: when mouse leaves the document/window entirely, collapse
         document.addEventListener('mouseleave', () => {
             if (this._hoverExpanded) {
                 this._endHoverExpand();
             }
         });
-
-        // Poll: if mouse is outside any visible element, collapse
-        this._startHoverPoll = () => {
-            if (this._hoverPollTimer) return;
-            this._hoverPollTimer = setInterval(() => {
-                if (!this._hoverExpanded) {
-                    clearInterval(this._hoverPollTimer);
-                    this._hoverPollTimer = null;
-                    return;
-                }
-                const el = document.elementFromPoint(this._lastMouseX, this._lastMouseY);
-                // If mouse isn't over any overlay element, collapse
-                if (!el || (!this.container.contains(el) && !this.collapsedTab.contains(el))) {
-                    this._endHoverExpand();
-                }
-            }, 200);
-        };
     }
 
     cacheElements() {
@@ -188,6 +177,9 @@ class WalkieTalkAIOverlay {
             case 'tool_complete':
                 this.handleToolComplete(data);
                 break;
+            case 'mouse-exit':
+                this._handleMouseExit();
+                break;
             default:
                 console.warn('Unknown event type:', data.type);
         }
@@ -206,7 +198,7 @@ class WalkieTalkAIOverlay {
         switch (data.state) {
             case 'recording':
                 this._hoverExpanded = false;
-                if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
+                window.walkieTalkai.hoverWatch(false);
                 this._clearIdleFadeTimer();
                 window.walkieTalkai.setOpacity(this._configOpacity);
                 this.statusDot.className = 'status-dot recording';
@@ -381,8 +373,10 @@ class WalkieTalkAIOverlay {
     // -----------------------------------------------------------------------
 
     expandOverlay({ resetContent = true } = {}) {
+        window.walkieTalkai.hoverWatch(false);
         if (this.isExpanded) return;
         this.isExpanded = true;
+        this._collapseOnLeave = false;
         this.clearAutoHideTimer();
         this._clearIdleFadeTimer();
         if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
@@ -437,12 +431,14 @@ class WalkieTalkAIOverlay {
     }
 
     collapseOverlay() {
+        window.walkieTalkai.hoverWatch(false);
         if (!this.isExpanded) return;
         // Don't collapse while a prompt is active
         if (this._activePrompt) return;
         this.isExpanded = false;
         this._hoverExpanded = false;
-        if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
+        this._collapseOnLeave = false;
+        this._mouseOnContainer = false;
         this.clearAutoHideTimer();
         if (this._growTimer) { clearTimeout(this._growTimer); this._growTimer = null; }
 
@@ -467,9 +463,19 @@ class WalkieTalkAIOverlay {
     _endHoverExpand() {
         if (!this._hoverExpanded) return;
         this._hoverExpanded = false;
-        if (this._hoverPollTimer) { clearInterval(this._hoverPollTimer); this._hoverPollTimer = null; }
+        window.walkieTalkai.hoverWatch(false);
         window.walkieTalkai.setIgnoreMouse(true);
         this.collapseOverlay();
+    }
+
+    /** Handle main-process mouse-exit detection (primary hover-off mechanism). */
+    _handleMouseExit() {
+        if (this._hoverExpanded) {
+            this._endHoverExpand();
+        } else if (this._collapseOnLeave) {
+            this._collapseOnLeave = false;
+            this.collapseOverlay();
+        }
     }
 
     _growToFitContent() {
@@ -540,8 +546,13 @@ class WalkieTalkAIOverlay {
     }
 
     startAutoHideTimer() {
-        if (this._activePrompt) return; // don't auto-hide with prompt active
+        if (this._activePrompt) return;
         this.clearAutoHideTimer();
+        if (this._mouseOnContainer) {
+            this._collapseOnLeave = true;
+            window.walkieTalkai.hoverWatch(true);
+            return;
+        }
         this.autoHideTimer = setTimeout(() => {
             this.collapseOverlay();
         }, this.autoHideSeconds * 1000);

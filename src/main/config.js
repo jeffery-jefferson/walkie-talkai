@@ -9,12 +9,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { app } from 'electron';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** Navigate from src/main/ → project root */
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+
+/**
+ * Return the directory for writable user files (config.yaml, logs).
+ * In a packaged app this is %APPDATA%/WalkieTalkAI; in dev it's the project root.
+ */
+export function getUserDataDir() {
+  try {
+    if (app.isPackaged) {
+      return app.getPath('userData');
+    }
+  } catch { /* not in Electron context */ }
+  return PROJECT_ROOT;
+}
 
 const VALID_POSITIONS = new Set([
   'top-left', 'top-right', 'bottom-left', 'bottom-right',
@@ -148,8 +162,8 @@ export function loadConfig(explicitPath) {
     if (parsed) data = deepMerge(data, parsed);
   }
 
-  // Layer 2 — config.yaml (user overrides)
-  const userYaml = path.join(PROJECT_ROOT, 'config.yaml');
+  // Layer 2 — config.yaml (user overrides, in userData when packaged)
+  const userYaml = getUserConfigPath();
   if (fs.existsSync(userYaml)) {
     const parsed = YAML.parse(fs.readFileSync(userYaml, 'utf8'));
     if (parsed) data = deepMerge(data, parsed);
@@ -178,10 +192,10 @@ export function saveConfig(cfg, filePath) {
 }
 
 /**
- * Return the absolute path to config.yaml in the project root.
+ * Return the absolute path to config.yaml (writable location).
  */
 export function getUserConfigPath() {
-  return path.join(PROJECT_ROOT, 'config.yaml');
+  return path.join(getUserDataDir(), 'config.yaml');
 }
 
 export { PROJECT_ROOT };

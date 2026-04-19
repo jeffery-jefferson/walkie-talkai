@@ -55,6 +55,7 @@ let copilot = null;
 let configWatcher = null;
 let isEnabled = true;
 let requestGen = 0; // stale response counter
+let hoverWatchTimer = null;
 
 // Prompt system state — pending promises keyed by requestId
 const pendingPrompts = new Map();
@@ -302,6 +303,28 @@ function registerOverlayIPC() {
       pendingPrompts.delete(requestId);
       pending.resolve(response);
     }
+  });
+
+  // Main-process cursor polling for reliable hover-off detection.
+  // DOM mouseleave is unreliable on transparent Electron windows;
+  // polling screen.getCursorScreenPoint() against expanded bounds is robust.
+  ipcMain.on('overlay-hover-watch', (_event, active) => {
+    if (hoverWatchTimer) { clearInterval(hoverWatchTimer); hoverWatchTimer = null; }
+    if (!active || !overlayWindow || overlayWindow.isDestroyed()) return;
+    hoverWatchTimer = setInterval(() => {
+      if (!overlayWindow || overlayWindow.isDestroyed()) {
+        clearInterval(hoverWatchTimer); hoverWatchTimer = null;
+        return;
+      }
+      const cursor = screen.getCursorScreenPoint();
+      const [wx, wy] = overlayWindow.getPosition();
+      // Check against final expanded bounds (not current animated size)
+      if (cursor.x < wx || cursor.x > wx + expandedWidth ||
+          cursor.y < wy || cursor.y > wy + expandedHeight) {
+        clearInterval(hoverWatchTimer); hoverWatchTimer = null;
+        overlayWindow.webContents.send('overlay-event', { type: 'mouse-exit' });
+      }
+    }, 150);
   });
 }
 
