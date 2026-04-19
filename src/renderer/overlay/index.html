@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+    <title>WalkieTalkAI Overlay</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Collapsed tab shown when idle -->
+    <div id="collapsed-tab" class="collapsed-tab">
+        <div class="tab-dot idle"></div>
+        <span class="tab-label">WalkieTalkAI</span>
+    </div>
+
+    <!-- Expanded card -->
+    <div id="overlay-container" class="overlay-container hidden">
+        <!-- Status indicator -->
+        <div id="status-area" class="status-area">
+            <div id="status-indicator" class="status-indicator">
+                <div class="status-dot"></div>
+                <span class="status-text">Ready</span>
+            </div>
+        </div>
+
+        <!-- Transcript area -->
+        <div id="transcript-area" class="transcript-area hidden">
+            <div class="transcript-label">You said:</div>
+            <div id="transcript-text" class="transcript-text"></div>
+        </div>
+
+        <!-- Reasoning area (collapsible "thinking...") -->
+        <div id="reasoning-area" class="reasoning-area hidden">
+            <button id="reasoning-toggle" class="reasoning-toggle" type="button">
+                <span class="reasoning-caret">▶</span>
+                <span id="reasoning-label" class="reasoning-label">Thinking...</span>
+                <span id="reasoning-timer" class="reasoning-timer"></span>
+            </button>
+            <div id="reasoning-content" class="reasoning-content hidden"></div>
+        </div>
+
+        <!-- Tool activity list -->
+        <div id="tool-area" class="tool-area hidden">
+            <div id="tool-list" class="tool-list"></div>
+        </div>
+
+        <!-- Response area -->
+        <div id="response-area" class="response-area hidden">
+            <div class="response-label">Assistant:</div>
+            <div id="response-content" class="response-content"></div>
+        </div>
+
+        <!-- Error area -->
+        <div id="error-area" class="error-area hidden">
+            <div class="error-icon">!</div>
+            <div id="error-message" class="error-message"></div>
+        </div>
+
+        <!-- Prompt area — modular prompt system for permissions, questions, forms -->
+        <div id="prompt-area" class="prompt-area hidden">
+            <div id="prompt-message" class="prompt-message"></div>
+            <div id="prompt-body" class="prompt-body"></div>
+            <div id="prompt-actions" class="prompt-actions"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

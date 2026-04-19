@@ -1,0 +1,36 @@
+copilot:
+  model: gpt-4.1
+  system_prompt: |
+    You are a helpful voice assistant. Be concise and direct.
+    Respond in plain text unless code is specifically requested.
+
+context:
+  working_directory: null
+  include_clipboard: false
+  custom_instructions: null
+
+activation:
+  hotkey: ctrl+shift+space
+  cancel_phrases:
+    - scrap that
+    - nevermind
+    - never mind
+    - scratch that
+
+stt:
+  model_path: models/sherpa-onnx/kroko-128l-en
+  sample_rate: 16000
+  hotwords: []
+
+overlay:
+  position: top-left
+  opacity: 0.92
+  auto_hide_seconds: 15
+  max_width: 340
+  max_height: 260
+
+mcp:
+  external_config_path: null
+
+tray:
+  enabled: true

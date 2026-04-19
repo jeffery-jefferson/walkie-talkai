@@ -1,0 +1,26 @@
+# Python (legacy)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Node / Electron
+node_modules/
+dist/
+build/
+out/
+*.asar
+
+# Config
+config.yaml
+.env
+
+# Models (large binary files)
+models/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

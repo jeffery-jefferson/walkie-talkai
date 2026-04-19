@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.walkietalkai.app",
+  "productName": "WalkieTalkAI",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "src/**/*",
+    "assets/**/*",
+    "config.default.yaml",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "models",
+      "to": "models",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "sidecar",
+      "to": "sidecar",
+      "filter": ["**/*", "!node_modules/**"]
+    }
+  ],
+  "win": {
+    "target": "nsis",
+    "icon": "assets/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": "always",
+    "createStartMenuShortcut": true,
+    "shortcutName": "WalkieTalkAI",
+    "installerIcon": "assets/icon.ico",
+    "uninstallerIcon": "assets/icon.ico",
+    "installerSidebar": null,
+    "uninstallDisplayName": "WalkieTalkAI",
+    "menuCategory": true
+  },
+  "asar": true,
+  "asarUnpack": [
+    "node_modules/sherpa-onnx-node/**",
+    "node_modules/decibri/**",
+    "node_modules/uiohook-napi/**"
+  ]
+}

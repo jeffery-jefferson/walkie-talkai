@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from walkie_talkai.activation.hotkey import HotkeyActivation; from walkie_talkai.audio.capture import AudioCapture; from walkie_talkai.stt.vosk_stt import VoskSTT; print\\('All imports OK'\\)\")",
+      "WebSearch",
+      "Bash(npm view *)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:decibri.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cd /tmp)",
+      "Bash(npm pack *)",
+      "Bash(tar xzf *)",
+      "Bash(ls package/)",
+      "Bash(timeout 15 npx electron .)",
+      "Bash(npm audit *)",
+      "Bash(npm ls *)",
+      "Bash(rm -rf node_modules package-lock.json)",
+      "Bash(npm install *)",
+      "Bash(timeout 20 npx electron test-copilot-electron.mjs)",
+      "Bash(timeout 25 npx electron test-copilot-electron.mjs)",
+      "Bash(timeout 30 npx electron test-copilot-electron.mjs)",
+      "Bash(gh api *)",
+      "Bash(curl -L -o model-large.tar.bz2 \"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2\")",
+      "Bash(tar xjf *)",
+      "Bash(rm model-large.tar.bz2)",
+      "Bash(timeout 20 npx electron .)",
+      "Bash(node -e ' *)",
+      "Bash(ls -lh models/sherpa-onnx/sherpa-onnx-streaming-zipformer-en-2023-06-26/*.onnx)",
+      "Bash(timeout 45 npx electron .)",
+      "Bash(timeout 25 npx electron .)",
+      "Bash(timeout 10 npx electron .)",
+      "Bash(timeout 60 npx electron test-prompt.mjs)"
+    ]
+  }
+}

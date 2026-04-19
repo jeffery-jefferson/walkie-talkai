@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+    <title>WalkieTalkAI Settings</title>
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <div class="settings-container">
+        <!-- Tab bar -->
+        <nav class="tab-bar">
+            <button class="tab active" data-tab="copilot">Copilot</button>
+            <button class="tab" data-tab="context">Context</button>
+            <button class="tab" data-tab="activation">Activation</button>
+            <button class="tab" data-tab="speech">Speech</button>
+            <button class="tab" data-tab="overlay">Overlay</button>
+            <button class="tab" data-tab="mcp">MCP Servers</button>
+        </nav>
+
+        <!-- Tab panels -->
+        <div class="tab-panels">
+            <!-- Copilot -->
+            <div class="panel active" id="panel-copilot">
+                <label>Model
+                    <select id="copilot-model"></select>
+                </label>
+                <label>System Prompt
+                    <textarea id="copilot-system-prompt" rows="6"></textarea>
+                </label>
+            </div>
+
+            <!-- Context -->
+            <div class="panel" id="panel-context">
+                <label>Working Directory
+                    <div class="browse-row">
+                        <input type="text" id="context-working-dir" placeholder="(optional)">
+                        <button class="browse-btn" id="browse-working-dir">Browse</button>
+                    </div>
+                </label>
+                <label>Custom Instructions File
+                    <div class="browse-row">
+                        <input type="text" id="context-custom-instructions" placeholder="(optional)">
+                        <button class="browse-btn" id="browse-custom-instructions">Browse</button>
+                    </div>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="context-include-clipboard">
+                    Include clipboard contents
+                </label>
+            </div>
+
+            <!-- Activation -->
+            <div class="panel" id="panel-activation">
+                <label>Push-to-Talk Hotkey
+                    <div class="hotkey-capture-row">
+                        <input type="text" id="activation-hotkey" readonly
+                               placeholder="Click and press your key combination..."
+                               title="Click the field, then press your desired key combination">
+                        <button type="button" class="browse-btn" id="clear-hotkey">Clear</button>
+                    </div>
+                    <div class="hotkey-hint">Click the field and press keys (e.g. Ctrl+Shift+Space, Ctrl+~, Alt+F1)</div>
+                </label>
+                <label>Cancel Phrases
+                    <div id="cancel-phrases-list" class="phrase-list"></div>
+                    <div class="phrase-add-row">
+                        <input type="text" id="cancel-phrase-input" placeholder="Add a cancel phrase...">
+                        <button class="add-btn" id="add-cancel-phrase">Add</button>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Speech -->
+            <div class="panel" id="panel-speech">
+                <label>Model Path
+                    <div class="browse-row">
+                        <input type="text" id="stt-model-path">
+                        <button class="browse-btn" id="browse-stt-model">Browse</button>
+                    </div>
+                </label>
+                <label>Sample Rate
+                    <input type="number" id="stt-sample-rate" min="8000" max="48000" step="1000">
+                </label>
+                <label>Hotwords
+                    <div class="mcp-hint" style="margin-bottom:6px;">Words the speech engine should recognize more accurately (e.g. git, npm, copilot)</div>
+                    <div id="hotwords-list" class="phrase-list"></div>
+                    <div class="phrase-add-row">
+                        <input type="text" id="hotword-input" placeholder="Add a hotword...">
+                        <button class="add-btn" id="add-hotword">Add</button>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Overlay -->
+            <div class="panel" id="panel-overlay">
+                <label>Position
+                    <select id="overlay-position">
+                        <option value="top-left">Top Left</option>
+                        <option value="top-center">Top Center</option>
+                        <option value="top-right">Top Right</option>
+                        <option value="bottom-left">Bottom Left</option>
+                        <option value="bottom-center">Bottom Center</option>
+                        <option value="bottom-right">Bottom Right</option>
+                    </select>
+                </label>
+                <label>Opacity
+                    <div class="slider-row">
+                        <input type="range" id="overlay-opacity" min="0" max="1" step="0.01">
+                        <span id="opacity-value">0.92</span>
+                    </div>
+                </label>
+                <label>Auto-Hide Seconds
+                    <input type="number" id="overlay-auto-hide" min="1" max="300">
+                </label>
+                <label>Max Width
+                    <input type="number" id="overlay-max-width" min="100" max="2000">
+                </label>
+                <label>Max Height
+                    <input type="number" id="overlay-max-height" min="100" max="2000">
+                </label>
+            </div>
+
+            <!-- MCP Servers -->
+            <div class="panel" id="panel-mcp">
+                <!-- App MCP Servers (editable) -->
+                <div class="mcp-section">
+                    <div class="mcp-section-header">
+                        <h3>App MCP Servers</h3>
+                        <span class="mcp-config-path" id="mcp-config-path" title=""></span>
+                    </div>
+                    <p class="mcp-hint">These servers are managed by WalkieTalkAI and can be edited here.</p>
+                    <div id="mcp-app-servers-list" class="mcp-server-list"></div>
+                    <button class="add-btn" id="mcp-add-server">+ Add Server</button>
+                </div>
+
+                <!-- Server Editor (hidden by default) -->
+                <div id="mcp-editor" class="mcp-editor" style="display:none;">
+                    <h4 id="mcp-editor-title">Add MCP Server</h4>
+                    <label>Server Name
+                        <input type="text" id="mcp-server-name" placeholder="my-server">
+                    </label>
+                    <label>Type
+                        <select id="mcp-server-type">
+                            <option value="local">Local (stdio)</option>
+                            <option value="http">Remote (HTTP)</option>
+                            <option value="sse">Remote (SSE)</option>
+                        </select>
+                    </label>
+                    <!-- Local fields -->
+                    <div id="mcp-local-fields">
+                        <label>Command
+                            <input type="text" id="mcp-server-command" placeholder="npx">
+                        </label>
+                        <label>Arguments (one per line)
+                            <textarea id="mcp-server-args" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-filesystem"></textarea>
+                        </label>
+                        <label>Working Directory
+                            <div class="browse-row">
+                                <input type="text" id="mcp-server-cwd" placeholder="(optional)">
+                                <button class="browse-btn" id="mcp-browse-cwd">Browse</button>
+                            </div>
+                        </label>
+                        <label>Environment Variables (KEY=VALUE, one per line)
+                            <textarea id="mcp-server-env" rows="2" placeholder="DEBUG=true&#10;NODE_ENV=production"></textarea>
+                        </label>
+                    </div>
+                    <!-- Remote fields -->
+                    <div id="mcp-remote-fields" style="display:none;">
+                        <label>URL
+                            <input type="text" id="mcp-server-url" placeholder="https://api.example.com/mcp">
+                        </label>
+                        <label>Headers (KEY=VALUE, one per line)
+                            <textarea id="mcp-server-headers" rows="2" placeholder="Authorization=Bearer token"></textarea>
+                        </label>
+                    </div>
+                    <!-- Common fields -->
+                    <label>Tools (comma-separated, or * for all)
+                        <input type="text" id="mcp-server-tools" value="*" placeholder="*">
+                    </label>
+                    <label>Timeout (ms)
+                        <input type="number" id="mcp-server-timeout" placeholder="(optional)" min="1">
+                    </label>
+                    <div class="mcp-editor-buttons">
+                        <button class="browse-btn" id="mcp-editor-cancel">Cancel</button>
+                        <button class="add-btn" id="mcp-editor-save">Save Server</button>
+                    </div>
+                    <div id="mcp-editor-error" class="mcp-error"></div>
+                </div>
+
+                <!-- External MCP Config (read-only) -->
+                <div class="mcp-section mcp-external-section">
+                    <h3>External MCP Config</h3>
+                    <p class="mcp-hint">Reference a pre-existing MCP JSON file. Servers from this file are read-only.</p>
+                    <label>External Config Path
+                        <div class="browse-row">
+                            <input type="text" id="mcp-external-path" placeholder="(none)" readonly>
+                            <button class="browse-btn" id="mcp-browse-external">Browse</button>
+                            <button class="browse-btn" id="mcp-clear-external">Clear</button>
+                        </div>
+                    </label>
+                    <div id="mcp-external-servers-list" class="mcp-server-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Button bar -->
+        <div class="button-bar">
+            <button id="btn-cancel">Cancel</button>
+            <button id="btn-apply">Apply</button>
+            <button id="btn-ok" class="primary">OK</button>
+        </div>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+</html>
