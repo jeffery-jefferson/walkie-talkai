@@ -33,6 +33,7 @@
     "icon": "assets/icon.ico"
   },
   "nsis": {
+    "artifactName": "${productName}-${version}-Installer.${ext}",
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": "always",
